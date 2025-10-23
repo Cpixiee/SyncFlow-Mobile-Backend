@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Enums\MeasurementType;
+use App\Enums\SampleStatus;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -16,6 +18,7 @@ class ProductMeasurement extends Model
         'product_id',
         'batch_number',
         'sample_count',
+        'measurement_type',
         'status',
         'overall_result',
         'measurement_results',
@@ -28,6 +31,7 @@ class ProductMeasurement extends Model
         'overall_result' => 'boolean',
         'measurement_results' => 'array',
         'measured_at' => 'datetime',
+        'measurement_type' => MeasurementType::class,
     ];
 
     /**
@@ -711,5 +715,78 @@ class ProductMeasurement extends Model
             default:
                 return false;
         }
-    }}
+    }
+
+    /**
+     * Get sample status based on measurement results
+     */
+    public function getSampleStatus(): SampleStatus
+    {
+        $results = $this->measurement_results ?? [];
+        
+        if (empty($results)) {
+            return SampleStatus::NOT_COMPLETE;
+        }
+        
+        $allSamplesOK = true;
+        $hasNG = false;
+        
+        foreach ($results as $result) {
+            if (!isset($result['samples']) || empty($result['samples'])) {
+                return SampleStatus::NOT_COMPLETE;
+            }
+            
+            foreach ($result['samples'] as $sample) {
+                if (!isset($sample['status'])) {
+                    return SampleStatus::NOT_COMPLETE;
+                }
+                
+                if (!$sample['status']) {
+                    $allSamplesOK = false;
+                    $hasNG = true;
+                }
+            }
+        }
+        
+        if ($hasNG) {
+            return SampleStatus::NG;
+        }
+        
+        return $allSamplesOK ? SampleStatus::OK : SampleStatus::NOT_COMPLETE;
+    }
+
+    /**
+     * Get product status
+     */
+    public function getProductStatus(): string
+    {
+        // Logic untuk menentukan product status
+        // Bisa berdasarkan quarter, active status, dll
+        return 'ACTIVE'; // Default untuk sekarang
+    }
+
+    /**
+     * Validate quarter range based on measurement type
+     */
+    public function validateQuarterRange(string $startDate, string $endDate): bool
+    {
+        $startMonth = date('m', strtotime($startDate));
+        $endMonth = date('m', strtotime($endDate));
+        
+        $quarterRanges = [
+            'Q1' => ['06', '07'],           // Juni-Juli
+            'Q2' => ['08', '09', '10'],     // Agustus-September-Oktober  
+            'Q3' => ['11', '12', '01', '02'], // November-Desember-Januari-Februari
+            'Q4' => ['03', '04', '05']      // Maret-April-Mei
+        ];
+        
+        foreach ($quarterRanges as $quarter => $months) {
+            if (in_array($startMonth, $months) && in_array($endMonth, $months)) {
+                return true;
+            }
+        }
+        
+        return false;
+    }
+}
 

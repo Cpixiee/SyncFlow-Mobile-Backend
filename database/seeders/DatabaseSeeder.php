@@ -29,10 +29,13 @@ class DatabaseSeeder extends Seeder
         if (app()->environment(['local', 'testing'])) {
             // User::factory(10)->create();
 
-            User::factory()->create([
-                'name' => 'Test User',
-                'email' => 'test@example.com',
-            ]);
+            User::updateOrCreate(
+                ['email' => 'test@example.com'],
+                [
+                    'name' => 'Test User',
+                    'email' => 'test@example.com',
+                ]
+            );
         }
     }
 }

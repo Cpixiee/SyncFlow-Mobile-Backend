@@ -195,6 +195,11 @@ class Product extends Model
      */
     public static function checkProductExists(array $basicInfo): bool
     {
+        // Validate required fields
+        if (!isset($basicInfo['product_category_id']) || !isset($basicInfo['product_name'])) {
+            throw new \InvalidArgumentException('product_category_id and product_name are required');
+        }
+
         $query = self::where('product_category_id', $basicInfo['product_category_id'])
                     ->where('product_name', $basicInfo['product_name']);
 

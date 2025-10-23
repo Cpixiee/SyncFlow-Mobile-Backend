@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\MeasurementInstrument;
 use App\Traits\ApiResponseTrait;
 use Illuminate\Http\Request;
+use Carbon\Carbon;
 
 class MeasurementInstrumentController extends Controller
 {
@@ -102,8 +103,10 @@ class MeasurementInstrumentController extends Controller
                     'specifications' => $instrument->specifications,
                     'display_name' => $instrument->display_name,
                     'needs_calibration' => $instrument->needsCalibration(),
-                    'last_calibration' => $instrument->last_calibration?->format('Y-m-d'),
-                    'next_calibration' => $instrument->next_calibration?->format('Y-m-d')
+                    'last_calibration' => $instrument->last_calibration ? 
+                        (is_string($instrument->last_calibration) ? $instrument->last_calibration : $instrument->last_calibration->format('Y-m-d')) : null,
+                    'next_calibration' => $instrument->next_calibration ? 
+                        (is_string($instrument->next_calibration) ? $instrument->next_calibration : $instrument->next_calibration->format('Y-m-d')) : null
                 ]
             ], 'Instrument details retrieved successfully');
 

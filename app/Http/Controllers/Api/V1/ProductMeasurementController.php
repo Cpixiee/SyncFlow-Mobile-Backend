@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Models\ProductMeasurement;
 use App\Models\Product;
+use App\Enums\MeasurementType;
+use App\Enums\SampleStatus;
 use App\Traits\ApiResponseTrait;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
@@ -27,17 +29,16 @@ class ProductMeasurementController extends Controller
                 return $this->unauthorizedResponse('User not authenticated');
             }
 
-            // Validate query parameters
+            // Validate query parameters (all optional now)
             $validator = Validator::make($request->all(), [
+                'start_date' => 'nullable|date',
+                'end_date' => 'nullable|date|after:start_date',
+                'measurement_type' => 'nullable|in:FULL_MEASUREMENT,SCALE_MEASUREMENT',
+                'status' => 'nullable|in:TODO,ONGOING,NEED_TO_MEASURE,OK,NG,NOT_COMPLETE',
                 'page' => 'nullable|integer|min:1',
                 'limit' => 'nullable|integer|min:1|max:100',
                 'product_category_id' => 'nullable|integer|exists:product_categories,id',
                 'query' => 'nullable|string|max:255',
-                'status' => 'nullable|in:TODO,ONGOING,NEED_TO_MEASURE,OK',
-                'quarter-timeline.quarter' => 'nullable|integer|min:1|max:4',
-                'quarter-timeline.year' => 'nullable|integer|min:2020|max:2030',
-                'monthly-timeline.month' => 'nullable|integer|min:1|max:12',
-                'monthly-timeline.year' => 'nullable|integer|min:2020|max:2030',
             ]);
 
             if ($validator->fails()) {
@@ -49,47 +50,39 @@ class ProductMeasurementController extends Controller
 
             $page = $request->get('page', 1);
             $limit = $request->get('limit', 10);
+            $startDate = $request->get('start_date');
+            $endDate = $request->get('end_date');
+            $measurementType = $request->get('measurement_type');
+            $status = $request->get('status');
             $productCategoryId = $request->get('product_category_id');
             $query = $request->get('query');
-            $status = $request->get('status');
-            $quarterTimeline = $request->get('quarter-timeline');
-            $monthlyTimeline = $request->get('monthly-timeline');
 
-            // Build base query
+            // Build base query with ProductMeasurement join
             $productsQuery = Product::with(['productCategory', 'quarter'])
-                ->select('products.*');
+                ->select('products.*')
+                ->join('product_measurements', 'products.id', '=', 'product_measurements.product_id')
+                ->distinct();
+
+            // Apply optional filters
+            if ($measurementType) {
+                $productsQuery->where('product_measurements.measurement_type', $measurementType);
+            }
+
+            if ($startDate && $endDate) {
+                $productsQuery->whereBetween('product_measurements.measured_at', [$startDate, $endDate]);
+            }
 
             // Apply filters
             if ($productCategoryId) {
-                $productsQuery->where('product_category_id', $productCategoryId);
+                $productsQuery->where('products.product_category_id', $productCategoryId);
             }
 
             if ($query) {
                 $productsQuery->where(function($q) use ($query) {
-                    $q->where('product_name', 'like', "%{$query}%")
-                      ->orWhere('product_id', 'like', "%{$query}%")
-                      ->orWhere('article_code', 'like', "%{$query}%")
-                      ->orWhere('ref_spec_number', 'like', "%{$query}%");
-                });
-            }
-
-            // Apply timeline filters
-            if ($quarterTimeline) {
-                $productsQuery->whereHas('quarter', function($q) use ($quarterTimeline) {
-                    $q->where('name', 'Q' . $quarterTimeline['quarter'])
-                      ->where('year', $quarterTimeline['year']);
-                });
-            }
-
-            if ($monthlyTimeline) {
-                $productsQuery->whereHas('quarter', function($q) use ($monthlyTimeline) {
-                    $month = $monthlyTimeline['month'];
-                    $year = $monthlyTimeline['year'];
-                    
-                    // Determine quarter based on month
-                    $quarter = ceil($month / 3);
-                    $q->where('name', 'Q' . $quarter)
-                      ->where('year', $year);
+                    $q->where('products.product_name', 'like', "%{$query}%")
+                      ->orWhere('products.product_id', 'like', "%{$query}%")
+                      ->orWhere('products.article_code', 'like', "%{$query}%")
+                      ->orWhere('products.ref_spec_number', 'like', "%{$query}%");
                 });
             }
 
@@ -99,12 +92,26 @@ class ProductMeasurementController extends Controller
 
             foreach ($products as $product) {
                 // Get latest measurement for this product
-                $latestMeasurement = ProductMeasurement::where('product_id', $product->id)
-                    ->latest('created_at')
-                    ->first();
+                $measurementQuery = ProductMeasurement::where('product_id', $product->id);
+                
+                // Apply optional filters to measurement query
+                if ($measurementType) {
+                    $measurementQuery->where('measurement_type', $measurementType);
+                }
+                
+                if ($startDate && $endDate) {
+                    $measurementQuery->whereBetween('measured_at', [$startDate, $endDate]);
+                }
+                
+                $latestMeasurement = $measurementQuery->latest('created_at')->first();
+
+                if (!$latestMeasurement) {
+                    continue;
+                }
 
                 // Determine status and progress
                 $productStatus = $this->determineProductStatus($latestMeasurement);
+                $sampleStatus = $latestMeasurement->getSampleStatus();
                 $progress = $this->calculateProgress($latestMeasurement);
                 
                 // Apply status filter if provided
@@ -113,13 +120,13 @@ class ProductMeasurementController extends Controller
                 }
 
                 $processedData[] = [
-                    'product_measurement_id' => $latestMeasurement ? $latestMeasurement->measurement_id : null,
+                    'product_measurement_id' => $latestMeasurement->measurement_id,
+                    'measurement_type' => $latestMeasurement->measurement_type->value,
                     'status' => $productStatus,
-                    'batch_number' => $latestMeasurement ? $latestMeasurement->batch_number : null,
+                    'sample_status' => $sampleStatus->value,
+                    'batch_number' => $latestMeasurement->batch_number,
                     'progress' => $progress,
-                    'due_date' => $latestMeasurement && $latestMeasurement->measured_at 
-                        ? $latestMeasurement->measured_at->addDays(30)->format('Y-m-d H:i:s') 
-                        : now()->addDays(30)->format('Y-m-d H:i:s'),
+                    'due_date' => $latestMeasurement->measured_at->format('Y-m-d H:i:s'),
                     'product' => [
                         'id' => $product->product_id,
                         'product_category_id' => $product->productCategory->id,
@@ -224,10 +231,13 @@ class ProductMeasurementController extends Controller
                 return $this->unauthorizedResponse('User not authenticated');
             }
 
-            // Validate request
+            // Validate request (support single or multiple products in one endpoint)
             $validator = Validator::make($request->all(), [
-                'product_id' => 'required|string|exists:products,product_id',
-                'due_date' => 'required|date|after:now',
+                'product_id' => 'required_without:product_ids|string|exists:products,product_id',
+                'product_ids' => 'required_without:product_id|array|min:1',
+                'product_ids.*' => 'string|exists:products,product_id',
+                'due_date' => 'required|date|after_or_equal:today',
+                'measurement_type' => 'required|in:FULL_MEASUREMENT,SCALE_MEASUREMENT',
                 'batch_number' => 'nullable|string|max:255',
                 'sample_count' => 'nullable|integer|min:1|max:100',
                 'notes' => 'nullable|string|max:1000',
@@ -240,24 +250,58 @@ class ProductMeasurementController extends Controller
                 );
             }
 
-            // Find product
+            // Check for duplicate measurement based on type
+            $duplicateCheck = $this->checkDuplicateMeasurement($request);
+            if ($duplicateCheck['has_duplicate']) {
+                return $this->errorResponse(
+                    $duplicateCheck['message'],
+                    'DUPLICATE_MEASUREMENT',
+                    400
+                );
+            }
+
+            // Handle multiple products
+            if ($request->filled('product_ids')) {
+                $results = [];
+                $products = Product::whereIn('product_id', $request->product_ids)->get();
+
+                foreach ($products as $product) {
+                    $batchNumber = $request->batch_number ?? 'BATCH-' . date('Ymd') . '-' . strtoupper(substr(uniqid(), -6));
+                    $measurementPoints = $product->measurement_points ?? [];
+                    $sampleCount = $request->sample_count ?? (count($measurementPoints) > 0 ? $measurementPoints[0]['setup']['sample_amount'] ?? 3 : 3);
+
+                    $measurement = ProductMeasurement::create([
+                        'product_id' => $product->id,
+                        'batch_number' => $batchNumber,
+                        'sample_count' => $sampleCount,
+                        'measurement_type' => $request->measurement_type,
+                        'status' => 'PENDING',
+                        'measured_by' => $user->id,
+                        'measured_at' => $request->due_date,
+                        'notes' => $request->notes,
+                    ]);
+
+                    $results[$product->product_id] = $measurement->measurement_id;
+                }
+
+                return $this->successResponse($results, 'Measurement entries created successfully', 201);
+            }
+
+            // Single product flow
             $product = Product::where('product_id', $request->product_id)->first();
             if (!$product) {
                 return $this->notFoundResponse('Product tidak ditemukan');
             }
 
-            // Auto-generate batch number if not provided
             $batchNumber = $request->batch_number ?? 'BATCH-' . date('Ymd') . '-' . strtoupper(substr(uniqid(), -6));
-            
-            // Get sample count from product measurement points
             $measurementPoints = $product->measurement_points ?? [];
             $sampleCount = $request->sample_count ?? (count($measurementPoints) > 0 ? $measurementPoints[0]['setup']['sample_amount'] ?? 3 : 3);
 
-            // Create measurement entry
             $measurement = ProductMeasurement::create([
                 'product_id' => $product->id,
                 'batch_number' => $batchNumber,
                 'sample_count' => $sampleCount,
+                'measurement_type' => $request->measurement_type,
                 'status' => 'PENDING',
                 'measured_by' => $user->id,
                 'measured_at' => $request->due_date,
@@ -272,6 +316,111 @@ class ProductMeasurementController extends Controller
             return $this->errorResponse(
                 'Could not create measurement entry',
                 'MEASUREMENT_CREATE_ERROR',
+                500
+            );
+        }
+    }
+
+    /**
+     * Bulk create measurements for multiple products
+     */
+    public function bulkStore(Request $request)
+    {
+        try {
+            $user = JWTAuth::parseToken()->authenticate();
+            if (!$user) {
+                return $this->unauthorizedResponse('User not authenticated');
+            }
+
+            $validator = Validator::make($request->all(), [
+                'product_ids' => 'required|array|min:1',
+                'product_ids.*' => 'required|string|exists:products,product_id',
+                'due_date' => 'required|date|after_or_equal:today',
+                'measurement_type' => 'required|in:FULL_MEASUREMENT,SCALE_MEASUREMENT',
+            ]);
+
+            if ($validator->fails()) {
+                return $this->validationErrorResponse(
+                    $validator->errors(),
+                    'Request invalid'
+                );
+            }
+
+            // Check for duplicate measurement based on type
+            $duplicateCheck = $this->checkDuplicateMeasurement($request);
+            if ($duplicateCheck['has_duplicate']) {
+                return $this->errorResponse(
+                    $duplicateCheck['message'],
+                    'DUPLICATE_MEASUREMENT',
+                    400
+                );
+            }
+
+            $results = [];
+
+            $products = Product::whereIn('product_id', $request->product_ids)->get();
+            foreach ($products as $product) {
+                $batchNumber = 'BATCH-' . date('Ymd') . '-' . strtoupper(substr(uniqid(), -6));
+
+                $measurement = ProductMeasurement::create([
+                    'product_id' => $product->id,
+                    'batch_number' => $batchNumber,
+                    'sample_count' => ($product->measurement_points[0]['setup']['sample_amount'] ?? 3),
+                    'measurement_type' => $request->measurement_type,
+                    'status' => 'PENDING',
+                    'measured_by' => $user->id,
+                    // measured_at sementara dipakai sebagai due_date
+                    'measured_at' => $request->due_date,
+                    'notes' => null,
+                ]);
+
+                $results[$product->product_id] = $measurement->measurement_id;
+            }
+
+            return $this->successResponse($results, 'Bulk measurements created successfully', 201);
+
+        } catch (\Exception $e) {
+            return $this->errorResponse(
+                'Could not create bulk measurement entries: ' . $e->getMessage(),
+                'MEASUREMENT_BULK_CREATE_ERROR',
+                500
+            );
+        }
+    }
+
+    /**
+     * Set batch number and move status to ONGOING (IN_PROGRESS)
+     */
+    public function setBatchNumber(Request $request, string $productMeasurementId)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'batch_number' => 'required|string|max:255',
+            ]);
+
+            if ($validator->fails()) {
+                return $this->validationErrorResponse(
+                    $validator->errors(),
+                    'Request invalid'
+                );
+            }
+
+            $measurement = ProductMeasurement::where('measurement_id', $productMeasurementId)->first();
+            if (!$measurement) {
+                return $this->notFoundResponse('Product measurement tidak ditemukan');
+            }
+
+            $measurement->update([
+                'batch_number' => $request->batch_number,
+                'status' => 'IN_PROGRESS',
+            ]);
+
+            return $this->successResponse(null, 'Batch number set successfully');
+
+        } catch (\Exception $e) {
+            return $this->errorResponse(
+                'Error setting batch number: ' . $e->getMessage(),
+                'SET_BATCH_ERROR',
                 500
             );
         }
@@ -853,7 +1002,10 @@ class ProductMeasurementController extends Controller
                 'product_id' => $measurement->product->product_id,
                 'batch_number' => $measurement->batch_number,
                 'sample_count' => $measurement->sample_count,
-                'status' => $measurement->status,
+                'measurement_type' => $measurement->measurement_type->value,
+                'product_status' => $measurement->getProductStatus(),
+                'measurement_status' => $measurement->status,
+                'sample_status' => $measurement->getSampleStatus()->value,
                 'overall_result' => $measurement->overall_result,
                 'measurement_results' => $measurement->measurement_results,
                 'measured_by' => $measurement->measuredBy ? [
@@ -872,5 +1024,196 @@ class ProductMeasurementController extends Controller
                 500
             );
         }
+    }
+
+    /**
+     * Create sample product from measurement results
+     */
+    public function createSampleProduct(Request $request, string $productMeasurementId)
+    {
+        try {
+            // Get authenticated user
+            $user = JWTAuth::parseToken()->authenticate();
+            
+            if (!$user) {
+                return $this->unauthorizedResponse('User not authenticated');
+            }
+
+            // Find the measurement
+            $measurement = ProductMeasurement::where('measurement_id', $productMeasurementId)->first();
+
+            if (!$measurement) {
+                return $this->notFoundResponse('Product measurement tidak ditemukan');
+            }
+
+            // Validate measurement is completed
+            if ($measurement->status !== 'COMPLETED') {
+                return $this->errorResponse(
+                    'Measurement harus diselesaikan terlebih dahulu',
+                    'MEASUREMENT_NOT_COMPLETED',
+                    400
+                );
+            }
+
+            // Create sample product data
+            $sampleProductData = [
+                'product_measurement_id' => $measurement->id,
+                'product_id' => $measurement->product_id,
+                'measurement_id' => $measurement->measurement_id,
+                'batch_number' => $measurement->batch_number,
+                'measurement_type' => $measurement->measurement_type->value,
+                'sample_data' => $measurement->measurement_results,
+                'overall_result' => $measurement->overall_result,
+                'sample_status' => $measurement->getSampleStatus()->value,
+                'status' => 'CREATED',
+                'created_by' => $user->id,
+                'created_at' => now(),
+            ];
+
+            // For now, we'll return the sample product data
+            // In real implementation, you might want to save this to a sample_products table
+            $sampleProductId = 'SAMPLE-' . strtoupper(substr(uniqid(), -8));
+
+            return $this->successResponse([
+                'sample_product_id' => $sampleProductId,
+                'product_measurement_id' => $measurement->measurement_id,
+                'status' => 'CREATED',
+                'sample_data' => $sampleProductData,
+                'created_by' => [
+                    'username' => $user->username,
+                    'employee_id' => $user->employee_id,
+                ],
+                'created_at' => now()->format('Y-m-d H:i:s'),
+            ], 'Sample product created successfully', 201);
+
+        } catch (\Exception $e) {
+            return $this->errorResponse(
+                'Error creating sample product: ' . $e->getMessage(),
+                'SAMPLE_PRODUCT_CREATE_ERROR',
+                500
+            );
+        }
+    }
+
+    /**
+     * Check for duplicate measurement based on measurement type
+     */
+    private function checkDuplicateMeasurement(Request $request): array
+    {
+        $measurementType = $request->measurement_type;
+        $dueDate = $request->due_date;
+        
+        if ($request->filled('product_id')) {
+            // Single product check
+            $product = Product::where('product_id', $request->product_id)->first();
+            if (!$product) {
+                return ['has_duplicate' => false, 'message' => ''];
+            }
+            
+            $hasDuplicate = $this->checkProductDuplicate($product->id, $measurementType, $dueDate);
+            if ($hasDuplicate) {
+                $message = $measurementType === 'FULL_MEASUREMENT' 
+                    ? 'Quarter ini sudah memiliki measurement (maksimal 1 data per quarter)'
+                    : 'Hari ini sudah memiliki measurement (maksimal 1 data per hari)';
+                return ['has_duplicate' => true, 'message' => $message];
+            }
+        } else {
+            // Multiple products check
+            $productIds = $request->product_ids;
+            $products = Product::whereIn('product_id', $productIds)->get();
+            
+            $duplicateProducts = [];
+            foreach ($products as $product) {
+                $hasDuplicate = $this->checkProductDuplicate($product->id, $measurementType, $dueDate);
+                if ($hasDuplicate) {
+                    $duplicateProducts[] = $product->product_id;
+                }
+            }
+            
+            if (!empty($duplicateProducts)) {
+                $message = $measurementType === 'FULL_MEASUREMENT'
+                    ? 'Quarter ini sudah memiliki measurement (maksimal 1 data per quarter)'
+                    : 'Hari ini sudah memiliki measurement (maksimal 1 data per hari)';
+                return ['has_duplicate' => true, 'message' => $message];
+            }
+        }
+        
+        return ['has_duplicate' => false, 'message' => ''];
+    }
+
+    /**
+     * Check if quarter/day has any measurement (regardless of product)
+     */
+    private function checkProductDuplicate(int $productId, string $measurementType, string $dueDate): bool
+    {
+        if ($measurementType === 'FULL_MEASUREMENT') {
+            // Check for any measurement in same quarter (regardless of product)
+            $quarterRange = $this->getQuarterRange($dueDate);
+            return ProductMeasurement::where('measurement_type', 'FULL_MEASUREMENT')
+                ->whereBetween('measured_at', [$quarterRange['start'], $quarterRange['end']])
+                ->exists();
+        } else {
+            // Check for any measurement in same day (regardless of product)
+            $dayStart = date('Y-m-d 00:00:00', strtotime($dueDate));
+            $dayEnd = date('Y-m-d 23:59:59', strtotime($dueDate));
+            
+            return ProductMeasurement::where('measurement_type', 'SCALE_MEASUREMENT')
+                ->whereBetween('measured_at', [$dayStart, $dayEnd])
+                ->exists();
+        }
+    }
+
+    /**
+     * Get quarter range based on date
+     */
+    private function getQuarterRange(string $date): array
+    {
+        $month = (int) date('m', strtotime($date));
+        $year = (int) date('Y', strtotime($date));
+        
+        $quarterRanges = [
+            'Q1' => ['06', '07', '08'],     // Juni-Juli-Agustus
+            'Q2' => ['09', '10', '11'],     // September-Oktober-November  
+            'Q3' => ['12', '01', '02'],     // Desember-Januari-Februari
+            'Q4' => ['03', '04', '05']      // Maret-April-Mei
+        ];
+        
+        foreach ($quarterRanges as $quarter => $months) {
+            if (in_array(sprintf('%02d', $month), $months)) {
+                // Determine quarter boundaries
+                if ($quarter === 'Q1') {
+                    $startDate = $year . '-06-01 00:00:00';
+                    $endDate = $year . '-08-31 23:59:59';
+                } elseif ($quarter === 'Q2') {
+                    $startDate = $year . '-09-01 00:00:00';
+                    $endDate = $year . '-11-30 23:59:59';
+                } elseif ($quarter === 'Q3') {
+                    // Handle year transition
+                    if (in_array($month, [12])) {
+                        $startDate = $year . '-12-01 00:00:00';
+                        $endDate = ($year + 1) . '-02-28 23:59:59';
+                    } else {
+                        $startDate = $year . '-01-01 00:00:00';
+                        $endDate = $year . '-02-28 23:59:59';
+                    }
+                } else { // Q4
+                    $startDate = $year . '-03-01 00:00:00';
+                    $endDate = $year . '-05-31 23:59:59';
+                }
+                
+                return [
+                    'start' => $startDate,
+                    'end' => $endDate,
+                    'quarter' => $quarter
+                ];
+            }
+        }
+        
+        // Default fallback
+        return [
+            'start' => $year . '-01-01 00:00:00',
+            'end' => $year . '-12-31 23:59:59',
+            'quarter' => 'Q1'
+        ];
     }
 }

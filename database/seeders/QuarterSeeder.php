@@ -21,6 +21,9 @@ class QuarterSeeder extends Seeder
         $currentQuarter = Quarter::where('year', 2024)->where('name', 'Q4')->first();
         if ($currentQuarter) {
             $currentQuarter->setAsActive();
+            $this->command->info('Q4 2024 set as active quarter');
+        } else {
+            $this->command->error('Q4 2024 not found!');
         }
         
         $this->command->info('Quarters berhasil dibuat untuk tahun 2024 dan 2025');

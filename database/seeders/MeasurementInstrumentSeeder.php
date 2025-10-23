@@ -91,7 +91,10 @@ class MeasurementInstrumentSeeder extends Seeder
         ];
 
         foreach ($instruments as $instrument) {
-            MeasurementInstrument::create($instrument);
+            MeasurementInstrument::updateOrCreate(
+                ['serial_number' => $instrument['serial_number']],
+                $instrument
+            );
         }
     }
 }

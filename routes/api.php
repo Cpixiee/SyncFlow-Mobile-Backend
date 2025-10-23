@@ -42,14 +42,17 @@ Route::prefix('v1')->group(function () {
         // Product Measurement routes - available for authenticated users
         Route::prefix('product-measurement')->group(function () {
             Route::post('/', [ProductMeasurementController::class, 'store']);
+            Route::post('/bulk', [ProductMeasurementController::class, 'bulkStore']);
+            Route::post('/{productMeasurementId}/set-batch-number', [ProductMeasurementController::class, 'setBatchNumber']);
             Route::post('/{productMeasurementId}/submit', [ProductMeasurementController::class, 'submitMeasurement']);
             Route::post('/{productMeasurementId}/samples/check', [ProductMeasurementController::class, 'checkSamples']);
             Route::post('/{productMeasurementId}/save-progress', [ProductMeasurementController::class, 'saveProgress']);
+            Route::post('/{productMeasurementId}/create-sample-product', [ProductMeasurementController::class, 'createSampleProduct']);
             Route::get('/{productMeasurementId}', [ProductMeasurementController::class, 'show']);
+            Route::get('/', [ProductMeasurementController::class, 'index']);
         });
 
         // Product Measurements List - for Monthly Target page
-        Route::get('/product-measurements', [ProductMeasurementController::class, 'index']);
 
         // Product Categories - available for authenticated users
         Route::prefix('product-categories')->group(function () {

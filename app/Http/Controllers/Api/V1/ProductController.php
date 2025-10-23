@@ -201,10 +201,11 @@ class ProductController extends Controller
             $page = $request->input('page', 1);
             $limit = $request->input('limit', 10);
 
-            $products = Product::with(['quarter', 'productCategory'])
-                ->paginate($limit, ['*'], 'page', $page);
-
-            $transformedProducts = $products->getCollection()->map(function ($product) {
+            $products = Product::with(['quarter','productCategory'])
+            ->paginate($limit, ['*'], 'page', $page);
+        
+        $transformedProducts = collect($products->items())
+            ->map(function ($product) {
                 return [
                     'id' => $product->product_id,
                     'product_category_id' => $product->product_category_id,
@@ -216,7 +217,7 @@ class ProductController extends Controller
                     'no_document' => $product->no_document,
                     'no_doc_reference' => $product->no_doc_reference,
                 ];
-            });
+            })->values()->all();
 
             return $this->paginationResponse(
                 $transformedProducts,
@@ -239,6 +240,24 @@ class ProductController extends Controller
     public function checkProductExists(Request $request)
     {
         try {
+            // Validate required parameters
+            $validator = Validator::make($request->all(), [
+                'product_category_id' => 'required|integer|exists:product_categories,id',
+                'product_name' => 'required|string|max:255',
+                'ref_spec_number' => 'nullable|string|max:255',
+                'nom_size_vo' => 'nullable|string|max:255',
+                'article_code' => 'nullable|string|max:255',
+                'no_document' => 'nullable|string|max:255',
+                'no_doc_reference' => 'nullable|string|max:255',
+            ]);
+
+            if ($validator->fails()) {
+                return $this->validationErrorResponse(
+                    $validator->errors(),
+                    'Request invalid'
+                );
+            }
+
             $exists = Product::checkProductExists($request->all());
             return $this->successResponse(['is_product_exists' => $exists]);
         } catch (\Exception $e) {
