@@ -25,6 +25,11 @@ class DatabaseSeeder extends Seeder
         // Seed product categories
         $this->call(ProductCategorySeeder::class);
         
+        // Seed qualitative test products (optional, for testing)
+        if (app()->environment(['local', 'testing'])) {
+            $this->call(QualitativeProductsSeeder::class);
+        }
+        
         // Only create test users in development environment
         if (app()->environment(['local', 'testing'])) {
             // User::factory(10)->create();

@@ -179,12 +179,18 @@ class ProductMeasurementTest extends TestCase
                     'data' => [
                         'measurement_id',
                         'product_id',
+                        'batch_number',
                         'sample_count',
-                        'status',
+                        'measurement_type',
+                        'product_status',
+                        'measurement_status',
+                        'sample_status',
                         'overall_result',
                         'measurement_results',
                         'measured_by',
-                        'measured_at'
+                        'measured_at',
+                        'notes',
+                        'created_at'
                     ]
                 ]);
     }

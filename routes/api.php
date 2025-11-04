@@ -57,6 +57,8 @@ Route::prefix('v1')->group(function () {
         // Product Categories - available for authenticated users
         Route::prefix('product-categories')->group(function () {
             Route::get('/', [ProductCategoryController::class, 'index']);
+            Route::get('/search-products', [ProductCategoryController::class, 'searchProducts']);
+            Route::get('/structure', [ProductCategoryController::class, 'getStructure']);
             Route::get('/{categoryId}/products', [ProductCategoryController::class, 'getProducts']);
         });
 
