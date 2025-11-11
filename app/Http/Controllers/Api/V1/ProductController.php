@@ -36,9 +36,10 @@ class ProductController extends Controller
                 'measurement_points.*.setup.name' => 'required|string',
                 'measurement_points.*.setup.name_id' => 'required|string|regex:/^[a-zA-Z_]+$/',
                 'measurement_points.*.setup.sample_amount' => 'required|integer|min:1',
-                'measurement_points.*.setup.source' => 'required|in:INSTRUMENT,MANUAL,DERIVED',
+                'measurement_points.*.setup.source' => 'required|in:INSTRUMENT,MANUAL,DERIVED,TOOL',
                 'measurement_points.*.setup.source_instrument_id' => 'required_if:measurement_points.*.setup.source,INSTRUMENT|nullable|integer|exists:measurement_instruments,id',
                 'measurement_points.*.setup.source_derived_name_id' => 'required_if:measurement_points.*.setup.source,DERIVED|nullable|string',
+                'measurement_points.*.setup.source_tool_model' => 'required_if:measurement_points.*.setup.source,TOOL|nullable|string',
                 'measurement_points.*.setup.type' => 'required|in:SINGLE,BEFORE_AFTER',
                 'measurement_points.*.setup.nature' => 'required|in:QUALITATIVE,QUANTITATIVE',
                 

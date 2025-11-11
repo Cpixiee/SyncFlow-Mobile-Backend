@@ -137,6 +137,11 @@ class Product extends Model
                         $errors[] = $pointPrefix . 'source_derived_name_id wajib diisi untuk source DERIVED';
                     }
                     break;
+                case 'TOOL':
+                    if (!isset($setup['source_tool_model']) || empty($setup['source_tool_model'])) {
+                        $errors[] = $pointPrefix . 'source_tool_model wajib diisi untuk source TOOL';
+                    }
+                    break;
             }
         }
 

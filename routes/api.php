@@ -7,6 +7,8 @@ use App\Http\Controllers\Api\V1\ProductController;
 use App\Http\Controllers\Api\V1\ProductMeasurementController;
 use App\Http\Controllers\Api\V1\ProductCategoryController;
 use App\Http\Controllers\Api\V1\MeasurementInstrumentController;
+use App\Http\Controllers\Api\V1\ToolController;
+use App\Http\Controllers\Api\V1\IssueController;
 
 // API Version 1 Routes
 Route::prefix('v1')->group(function () {
@@ -26,8 +28,6 @@ Route::prefix('v1')->group(function () {
             Route::post('/', [MeasurementController::class, 'store']);
             Route::get('/{id}', [MeasurementController::class, 'show']);
             Route::post('/{id}/process-formula', [MeasurementController::class, 'processFormula']);
-            Route::get('/demo/calculation', [MeasurementController::class, 'demoCalculation']);
-            Route::get('/demo/mixed-calculation', [MeasurementController::class, 'demoMixedCalculation']);
         });
 
         // Product routes - Admin and SuperAdmin can CRUD
@@ -66,6 +66,39 @@ Route::prefix('v1')->group(function () {
         Route::prefix('measurement-instruments')->group(function () {
             Route::get('/', [MeasurementInstrumentController::class, 'index']);
             Route::get('/{instrumentId}', [MeasurementInstrumentController::class, 'show']);
+        });
+
+        // Tools - available for authenticated users
+        Route::prefix('tools')->group(function () {
+            Route::get('/', [ToolController::class, 'index']);
+            Route::get('/models', [ToolController::class, 'getModels']);
+            Route::get('/by-model', [ToolController::class, 'getByModel']);
+            Route::get('/{id}', [ToolController::class, 'show']);
+            
+            // Admin and SuperAdmin can CRUD
+            Route::middleware('role:admin,superadmin')->group(function () {
+                Route::post('/', [ToolController::class, 'store']);
+                Route::put('/{id}', [ToolController::class, 'update']);
+                Route::delete('/{id}', [ToolController::class, 'destroy']);
+            });
+        });
+
+        // Issues - available for authenticated users
+        Route::prefix('issues')->group(function () {
+            Route::get('/', [IssueController::class, 'index']);
+            Route::get('/{id}', [IssueController::class, 'show']);
+            Route::get('/{id}/comments', [IssueController::class, 'getComments']);
+            
+            // All authenticated users can comment
+            Route::post('/{id}/comments', [IssueController::class, 'addComment']);
+            Route::delete('/{issueId}/comments/{commentId}', [IssueController::class, 'deleteComment']);
+            
+            // Admin and SuperAdmin can CRUD issues
+            Route::middleware('role:admin,superadmin')->group(function () {
+                Route::post('/', [IssueController::class, 'store']);
+                Route::put('/{id}', [IssueController::class, 'update']);
+                Route::delete('/{id}', [IssueController::class, 'destroy']);
+            });
         });
 
         // SuperAdmin only routes

@@ -25,6 +25,17 @@ class DatabaseSeeder extends Seeder
         // Seed product categories
         $this->call(ProductCategorySeeder::class);
         
+        // Seed measurement instruments
+        $this->call(MeasurementInstrumentSeeder::class);
+        
+        // Seed tools
+        $this->call(ToolSeeder::class);
+        
+        // Seed issues (optional, for testing)
+        if (app()->environment(['local', 'testing'])) {
+            $this->call(IssueSeeder::class);
+        }
+        
         // Seed qualitative test products (optional, for testing)
         if (app()->environment(['local', 'testing'])) {
             $this->call(QualitativeProductsSeeder::class);
@@ -32,15 +43,8 @@ class DatabaseSeeder extends Seeder
         
         // Only create test users in development environment
         if (app()->environment(['local', 'testing'])) {
+            // Note: Use LoginUser model for API authentication instead of User model
             // User::factory(10)->create();
-
-            User::updateOrCreate(
-                ['email' => 'test@example.com'],
-                [
-                    'name' => 'Test User',
-                    'email' => 'test@example.com',
-                ]
-            );
         }
     }
 }

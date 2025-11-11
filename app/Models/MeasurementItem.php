@@ -12,6 +12,7 @@ class MeasurementItem extends Model
 
     protected $fillable = [
         'measurement_id',
+        'tool_id',
         'thickness_type',
         'value',
         'sequence'
@@ -24,6 +25,11 @@ class MeasurementItem extends Model
     public function measurement(): BelongsTo
     {
         return $this->belongsTo(Measurement::class);
+    }
+
+    public function tool(): BelongsTo
+    {
+        return $this->belongsTo(Tool::class);
     }
 }
 

@@ -1,0 +1,392 @@
+<?php
+
+namespace App\Http\Controllers\Api\V1;
+
+use App\Http\Controllers\Controller;
+use App\Models\Tool;
+use App\Enums\ToolType;
+use App\Enums\ToolStatus;
+use App\Traits\ApiResponseTrait;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\Rules\Enum;
+
+class ToolController extends Controller
+{
+    use ApiResponseTrait;
+
+    /**
+     * Get list of tools
+     * Query params:
+     *   - page (optional): page number, default 1
+     *   - limit (optional): items per page, default 10
+     *   - status (optional): filter by ACTIVE/INACTIVE
+     *   - tool_model (optional): filter by tool model
+     *   - tool_type (optional): filter by OPTICAL/MECHANICAL
+     *   - search (optional): search by tool_name, tool_model, or imei
+     */
+    public function index(Request $request)
+    {
+        try {
+            $page = $request->input('page', 1);
+            $limit = $request->input('limit', 10);
+
+            $query = Tool::query();
+
+            // Filter by status
+            if ($request->has('status')) {
+                $status = strtoupper($request->input('status'));
+                if (in_array($status, ['ACTIVE', 'INACTIVE'])) {
+                    $query->where('status', $status);
+                }
+            }
+
+            // Filter by tool_model
+            if ($request->has('tool_model')) {
+                $query->where('tool_model', $request->input('tool_model'));
+            }
+
+            // Filter by tool_type
+            if ($request->has('tool_type')) {
+                $toolType = strtoupper($request->input('tool_type'));
+                if (in_array($toolType, ['OPTICAL', 'MECHANICAL'])) {
+                    $query->where('tool_type', $toolType);
+                }
+            }
+
+            // Search
+            if ($request->has('search')) {
+                $search = $request->input('search');
+                $query->where(function($q) use ($search) {
+                    $q->where('tool_name', 'like', "%{$search}%")
+                      ->orWhere('tool_model', 'like', "%{$search}%")
+                      ->orWhere('imei', 'like', "%{$search}%");
+                });
+            }
+
+            $tools = $query->orderBy('created_at', 'desc')
+                ->paginate($limit, ['*'], 'page', $page);
+
+            $transformedTools = collect($tools->items())
+                ->map(function ($tool) {
+                    return [
+                        'id' => $tool->id,
+                        'tool_name' => $tool->tool_name,
+                        'tool_model' => $tool->tool_model,
+                        'tool_type' => $tool->tool_type->value,
+                        'tool_type_description' => $tool->tool_type->getDescription(),
+                        'last_calibration' => $tool->last_calibration?->format('Y-m-d'),
+                        'next_calibration' => $tool->next_calibration?->format('Y-m-d'),
+                        'imei' => $tool->imei,
+                        'status' => $tool->status->value,
+                        'status_description' => $tool->status->getDescription(),
+                        'created_at' => $tool->created_at->toISOString(),
+                        'updated_at' => $tool->updated_at->toISOString(),
+                    ];
+                })->values()->all();
+
+            return $this->paginationResponse(
+                $transformedTools,
+                [
+                    'current_page' => $tools->currentPage(),
+                    'total_page' => $tools->lastPage(),
+                    'limit' => $tools->perPage(),
+                    'total_docs' => $tools->total(),
+                ],
+                'Tools retrieved successfully'
+            );
+
+        } catch (\Exception $e) {
+            return $this->errorResponse(
+                'Error retrieving tools: ' . $e->getMessage(),
+                'TOOL_RETRIEVAL_ERROR',
+                500
+            );
+        }
+    }
+
+    /**
+     * Get single tool by ID
+     */
+    public function show(int $id)
+    {
+        try {
+            $tool = Tool::find($id);
+
+            if (!$tool) {
+                return $this->notFoundResponse('Tool not found');
+            }
+
+            return $this->successResponse(
+                [
+                    'id' => $tool->id,
+                    'tool_name' => $tool->tool_name,
+                    'tool_model' => $tool->tool_model,
+                    'tool_type' => $tool->tool_type->value,
+                    'tool_type_description' => $tool->tool_type->getDescription(),
+                    'last_calibration' => $tool->last_calibration?->format('Y-m-d'),
+                    'next_calibration' => $tool->next_calibration?->format('Y-m-d'),
+                    'imei' => $tool->imei,
+                    'status' => $tool->status->value,
+                    'status_description' => $tool->status->getDescription(),
+                    'created_at' => $tool->created_at->toISOString(),
+                    'updated_at' => $tool->updated_at->toISOString(),
+                ],
+                'Tool retrieved successfully'
+            );
+
+        } catch (\Exception $e) {
+            return $this->errorResponse(
+                'Error retrieving tool: ' . $e->getMessage(),
+                'TOOL_RETRIEVAL_ERROR',
+                500
+            );
+        }
+    }
+
+    /**
+     * Create new tool
+     */
+    public function store(Request $request)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'tool_name' => 'required|string|max:255',
+                'tool_model' => 'required|string|max:255',
+                'tool_type' => ['required', new Enum(ToolType::class)],
+                'last_calibration' => 'nullable|date',
+                'imei' => 'required|string|max:255|unique:tools,imei',
+                'status' => ['nullable', new Enum(ToolStatus::class)],
+            ]);
+
+            if ($validator->fails()) {
+                return $this->validationErrorResponse($validator->errors());
+            }
+
+            // Create tool
+            $tool = Tool::create([
+                'tool_name' => $request->input('tool_name'),
+                'tool_model' => $request->input('tool_model'),
+                'tool_type' => $request->input('tool_type'),
+                'last_calibration' => $request->input('last_calibration'),
+                'imei' => $request->input('imei'),
+                'status' => $request->input('status', 'ACTIVE'),
+            ]);
+
+            return $this->successResponse(
+                [
+                    'id' => $tool->id,
+                    'tool_name' => $tool->tool_name,
+                    'tool_model' => $tool->tool_model,
+                    'tool_type' => $tool->tool_type->value,
+                    'tool_type_description' => $tool->tool_type->getDescription(),
+                    'last_calibration' => $tool->last_calibration?->format('Y-m-d'),
+                    'next_calibration' => $tool->next_calibration?->format('Y-m-d'),
+                    'imei' => $tool->imei,
+                    'status' => $tool->status->value,
+                    'status_description' => $tool->status->getDescription(),
+                    'created_at' => $tool->created_at->toISOString(),
+                    'updated_at' => $tool->updated_at->toISOString(),
+                ],
+                'Tool created successfully',
+                201
+            );
+
+        } catch (\Exception $e) {
+            return $this->errorResponse(
+                'Error creating tool: ' . $e->getMessage(),
+                'TOOL_CREATE_ERROR',
+                500
+            );
+        }
+    }
+
+    /**
+     * Update existing tool
+     */
+    public function update(Request $request, int $id)
+    {
+        try {
+            $tool = Tool::find($id);
+
+            if (!$tool) {
+                return $this->notFoundResponse('Tool not found');
+            }
+
+            $validator = Validator::make($request->all(), [
+                'tool_name' => 'nullable|string|max:255',
+                'tool_model' => 'nullable|string|max:255',
+                'tool_type' => ['nullable', new Enum(ToolType::class)],
+                'last_calibration' => 'nullable|date',
+                'imei' => 'nullable|string|max:255|unique:tools,imei,' . $id,
+                'status' => ['nullable', new Enum(ToolStatus::class)],
+            ]);
+
+            if ($validator->fails()) {
+                return $this->validationErrorResponse($validator->errors());
+            }
+
+            // Update tool - hanya update field yang dikirim
+            if ($request->has('tool_name')) {
+                $tool->tool_name = $request->input('tool_name');
+            }
+            if ($request->has('tool_model')) {
+                $tool->tool_model = $request->input('tool_model');
+            }
+            if ($request->has('tool_type')) {
+                $tool->tool_type = $request->input('tool_type');
+            }
+            if ($request->has('last_calibration')) {
+                $tool->last_calibration = $request->input('last_calibration');
+                // next_calibration akan otomatis terupdate oleh model boot method
+            }
+            if ($request->has('imei')) {
+                $tool->imei = $request->input('imei');
+            }
+            if ($request->has('status')) {
+                $tool->status = $request->input('status');
+            }
+
+            $tool->save();
+
+            return $this->successResponse(
+                [
+                    'id' => $tool->id,
+                    'tool_name' => $tool->tool_name,
+                    'tool_model' => $tool->tool_model,
+                    'tool_type' => $tool->tool_type->value,
+                    'tool_type_description' => $tool->tool_type->getDescription(),
+                    'last_calibration' => $tool->last_calibration?->format('Y-m-d'),
+                    'next_calibration' => $tool->next_calibration?->format('Y-m-d'),
+                    'imei' => $tool->imei,
+                    'status' => $tool->status->value,
+                    'status_description' => $tool->status->getDescription(),
+                    'created_at' => $tool->created_at->toISOString(),
+                    'updated_at' => $tool->updated_at->toISOString(),
+                ],
+                'Tool updated successfully'
+            );
+
+        } catch (\Exception $e) {
+            return $this->errorResponse(
+                'Error updating tool: ' . $e->getMessage(),
+                'TOOL_UPDATE_ERROR',
+                500
+            );
+        }
+    }
+
+    /**
+     * Delete tool
+     */
+    public function destroy(int $id)
+    {
+        try {
+            $tool = Tool::find($id);
+
+            if (!$tool) {
+                return $this->notFoundResponse('Tool not found');
+            }
+
+            $tool->delete();
+
+            return $this->successResponse(
+                ['deleted' => true],
+                'Tool deleted successfully'
+            );
+
+        } catch (\Exception $e) {
+            return $this->errorResponse(
+                'Error deleting tool: ' . $e->getMessage(),
+                'TOOL_DELETE_ERROR',
+                500
+            );
+        }
+    }
+
+    /**
+     * Get unique tool models (untuk dropdown saat create product)
+     * Hanya menampilkan tool yang ACTIVE
+     */
+    public function getModels()
+    {
+        try {
+            $models = Tool::active()
+                ->select('tool_model', 'tool_type')
+                ->orderBy('tool_model')
+                ->get()
+                ->groupBy('tool_model')
+                ->map(function ($items, $model) {
+                    return [
+                        'tool_model' => $model,
+                        'tool_type' => $items->first()->tool_type->value,
+                        'tool_type_description' => $items->first()->tool_type->getDescription(),
+                        'imei_count' => $items->count(),
+                    ];
+                })->values();
+
+            return $this->successResponse(
+                $models->toArray(),
+                'Tool models retrieved successfully'
+            );
+
+        } catch (\Exception $e) {
+            return $this->errorResponse(
+                'Error retrieving tool models: ' . $e->getMessage(),
+                'TOOL_MODELS_ERROR',
+                500
+            );
+        }
+    }
+
+    /**
+     * Get tools by model (untuk select IMEI saat measurement)
+     * Hanya menampilkan tool yang ACTIVE dengan model tertentu
+     */
+    public function getByModel(Request $request)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'tool_model' => 'required|string',
+            ]);
+
+            if ($validator->fails()) {
+                return $this->validationErrorResponse($validator->errors());
+            }
+
+            $toolModel = $request->input('tool_model');
+            
+            $tools = Tool::active()
+                ->byModel($toolModel)
+                ->get();
+
+            if ($tools->isEmpty()) {
+                return $this->notFoundResponse('No active tools found for this model');
+            }
+
+            return $this->successResponse(
+                [
+                    'tool_model' => $toolModel,
+                    'tools' => $tools->map(function ($tool) {
+                        return [
+                            'id' => $tool->id,
+                            'tool_name' => $tool->tool_name,
+                            'imei' => $tool->imei,
+                            'last_calibration' => $tool->last_calibration?->format('Y-m-d'),
+                            'next_calibration' => $tool->next_calibration?->format('Y-m-d'),
+                        ];
+                    })->values()->all()
+                ],
+                'Tools retrieved successfully'
+            );
+
+        } catch (\Exception $e) {
+            return $this->errorResponse(
+                'Error retrieving tools by model: ' . $e->getMessage(),
+                'TOOL_BY_MODEL_ERROR',
+                500
+            );
+        }
+    }
+}
+
