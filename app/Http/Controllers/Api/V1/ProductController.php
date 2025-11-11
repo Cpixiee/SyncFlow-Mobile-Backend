@@ -7,6 +7,7 @@ use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Models\Quarter;
 use App\Traits\ApiResponseTrait;
+use App\Helpers\FormulaHelper;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 
@@ -97,6 +98,15 @@ class ProductController extends Controller
                     'INVALID_PRODUCT_NAME',
                     400
                 );
+            }
+
+            // Auto-generate name_id if not provided
+            $measurementPoints = $this->autoGenerateNameIds($measurementPoints);
+
+            // Validate and process formulas
+            $formulaValidationErrors = $this->validateAndProcessFormulas($measurementPoints);
+            if (!empty($formulaValidationErrors)) {
+                return $this->errorResponse('Formula validation failed', 'FORMULA_VALIDATION_ERROR', 400, $formulaValidationErrors);
             }
 
             // Process measurement groups if provided
@@ -190,6 +200,67 @@ class ProductController extends Controller
 
         } catch (\Exception $e) {
             return $this->errorResponse('Error: ' . $e->getMessage(), 'FETCH_ERROR', 500);
+        }
+    }
+
+    /**
+     * Get measurement items suggestions for autocomplete
+     * Used when user types formula to suggest available measurement items
+     * 
+     * GET /api/v1/products/{productId}/measurement-items/suggest?query=temp
+     */
+    public function suggestMeasurementItems(string $productId, Request $request)
+    {
+        try {
+            $query = $request->input('query', '');
+            
+            // Get product
+            $product = Product::where('product_id', $productId)->first();
+            if (!$product) {
+                return $this->notFoundResponse('Product tidak ditemukan');
+            }
+            
+            $measurementPoints = $product->measurement_points ?? [];
+            $suggestions = [];
+            
+            // Filter measurement items based on query
+            foreach ($measurementPoints as $point) {
+                if (!isset($point['setup']['name']) || !isset($point['setup']['name_id'])) {
+                    continue;
+                }
+                
+                $name = $point['setup']['name'];
+                $nameId = $point['setup']['name_id'];
+                
+                // If query is empty, return all
+                if (empty($query)) {
+                    $suggestions[] = [
+                        'name' => $name,
+                        'name_id' => $nameId,
+                        'type' => $point['setup']['nature'] ?? 'QUANTITATIVE'
+                    ];
+                    continue;
+                }
+                
+                // Case-insensitive search in name or name_id
+                if (stripos($name, $query) !== false || stripos($nameId, $query) !== false) {
+                    $suggestions[] = [
+                        'name' => $name,
+                        'name_id' => $nameId,
+                        'type' => $point['setup']['nature'] ?? 'QUANTITATIVE',
+                        'source' => $point['setup']['source'] ?? null
+                    ];
+                }
+            }
+            
+            return $this->successResponse([
+                'query' => $query,
+                'suggestions' => $suggestions,
+                'total' => count($suggestions)
+            ], 'Suggestions retrieved successfully');
+            
+        } catch (\Exception $e) {
+            return $this->errorResponse('Error: ' . $e->getMessage(), 'SUGGESTION_ERROR', 500);
         }
     }
 
@@ -403,6 +474,167 @@ class ProductController extends Controller
         return $orderedMeasurementPoints;
     }
 
+    /**
+     * Auto-generate name_id if not provided
+     * Example: "Room Temp" -> "room_temp"
+     */
+    private function autoGenerateNameIds(array $measurementPoints): array
+    {
+        foreach ($measurementPoints as &$point) {
+            // Generate name_id for setup if not provided
+            if (!isset($point['setup']['name_id']) || empty($point['setup']['name_id'])) {
+                $point['setup']['name_id'] = FormulaHelper::generateNameId($point['setup']['name']);
+            }
+            
+            // Generate name_id for variables if not provided
+            if (isset($point['variables']) && is_array($point['variables'])) {
+                foreach ($point['variables'] as &$variable) {
+                    if (!isset($variable['name']) || empty($variable['name'])) {
+                        continue;
+                    }
+                    // Variables should already have proper name, just ensure it's valid
+                }
+            }
+            
+            // Generate name_id for pre-processing formulas if not provided
+            if (isset($point['pre_processing_formulas']) && is_array($point['pre_processing_formulas'])) {
+                foreach ($point['pre_processing_formulas'] as &$formula) {
+                    if (!isset($formula['name']) || empty($formula['name'])) {
+                        continue;
+                    }
+                    // Formula names should already be proper identifiers
+                }
+            }
+        }
+        
+        return $measurementPoints;
+    }
+
+    /**
+     * Validate and process all formulas in measurement points
+     * - Validate formula format (must start with =)
+     * - Validate formula dependencies (referenced measurement items must exist)
+     * - Normalize function names (AVG -> avg, SIN -> sin, etc)
+     */
+    private function validateAndProcessFormulas(array &$measurementPoints): array
+    {
+        $errors = [];
+        
+        foreach ($measurementPoints as $pointIndex => &$point) {
+            $pointPrefix = "measurement_point_{$pointIndex}";
+            
+            // Get available measurement IDs (only those defined BEFORE current point)
+            $availableIds = [];
+            for ($i = 0; $i < $pointIndex; $i++) {
+                if (isset($measurementPoints[$i]['setup']['name_id'])) {
+                    $availableIds[] = $measurementPoints[$i]['setup']['name_id'];
+                }
+            }
+            
+            // Validate variables formulas
+            if (isset($point['variables']) && is_array($point['variables'])) {
+                foreach ($point['variables'] as $varIndex => &$variable) {
+                    if ($variable['type'] === 'FORMULA' && isset($variable['formula'])) {
+                        $formulaErrors = $this->validateSingleFormula(
+                            $variable['formula'],
+                            $availableIds,
+                            "{$pointPrefix}.variable_{$varIndex}"
+                        );
+                        
+                        if (!empty($formulaErrors)) {
+                            $errors = array_merge($errors, $formulaErrors);
+                        } else {
+                            // Process formula: strip =, normalize functions
+                            try {
+                                $variable['formula'] = FormulaHelper::processFormula($variable['formula']);
+                            } catch (\InvalidArgumentException $e) {
+                                $errors["{$pointPrefix}.variable_{$varIndex}"] = $e->getMessage();
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Validate pre-processing formulas
+            if (isset($point['pre_processing_formulas']) && is_array($point['pre_processing_formulas'])) {
+                foreach ($point['pre_processing_formulas'] as $formulaIndex => &$formula) {
+                    if (isset($formula['formula'])) {
+                        $formulaErrors = $this->validateSingleFormula(
+                            $formula['formula'],
+                            $availableIds,
+                            "{$pointPrefix}.pre_processing_formula_{$formulaIndex}"
+                        );
+                        
+                        if (!empty($formulaErrors)) {
+                            $errors = array_merge($errors, $formulaErrors);
+                        } else {
+                            // Process formula
+                            try {
+                                $formula['formula'] = FormulaHelper::processFormula($formula['formula']);
+                            } catch (\InvalidArgumentException $e) {
+                                $errors["{$pointPrefix}.pre_processing_formula_{$formulaIndex}"] = $e->getMessage();
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Validate joint setting formulas
+            if (isset($point['evaluation_setting']['joint_setting']['formulas']) && is_array($point['evaluation_setting']['joint_setting']['formulas'])) {
+                foreach ($point['evaluation_setting']['joint_setting']['formulas'] as $formulaIndex => &$formula) {
+                    if (isset($formula['formula'])) {
+                        // For joint formulas, can reference current measurement item's pre-processing results
+                        $jointAvailableIds = array_merge($availableIds, [$point['setup']['name_id']]);
+                        
+                        $formulaErrors = $this->validateSingleFormula(
+                            $formula['formula'],
+                            $jointAvailableIds,
+                            "{$pointPrefix}.joint_formula_{$formulaIndex}"
+                        );
+                        
+                        if (!empty($formulaErrors)) {
+                            $errors = array_merge($errors, $formulaErrors);
+                        } else {
+                            // Process formula
+                            try {
+                                $formula['formula'] = FormulaHelper::processFormula($formula['formula']);
+                            } catch (\InvalidArgumentException $e) {
+                                $errors["{$pointPrefix}.joint_formula_{$formulaIndex}"] = $e->getMessage();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        return $errors;
+    }
+
+    /**
+     * Validate a single formula
+     */
+    private function validateSingleFormula(string $formula, array $availableIds, string $errorPrefix): array
+    {
+        $errors = [];
+        
+        // Validate format (must start with =)
+        try {
+            FormulaHelper::validateFormulaFormat($formula);
+        } catch (\InvalidArgumentException $e) {
+            $errors[$errorPrefix] = $e->getMessage();
+            return $errors;
+        }
+        
+        // Validate dependencies
+        $missingDependencies = FormulaHelper::validateFormulaDependencies($formula, $availableIds);
+        if (!empty($missingDependencies)) {
+            $errors[$errorPrefix] = "Formula references measurement items yang belum dibuat: " . 
+                implode(', ', $missingDependencies) . 
+                ". Pastikan measurement item tersebut dibuat lebih dulu (order matters).";
+        }
+        
+        return $errors;
+    }
 
     /**
      * Validate rule evaluation setting

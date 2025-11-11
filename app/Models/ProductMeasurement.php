@@ -357,7 +357,7 @@ class ProductMeasurement extends Model
         $this->registerCustomFunctions($executor);
         
         // Register AVG function untuk aggregasi samples
-        $executor->addFunction('AVG', function($values) {
+        $executor->addFunction('avg', function($values) {
             if (is_array($values)) {
                 return count($values) > 0 ? array_sum($values) / count($values) : 0;
             }
@@ -415,7 +415,7 @@ class ProductMeasurement extends Model
         // Register AVG function untuk menghitung rata-rata dari measurement item lain
         $measurement = $this;
         
-        $executor->addFunction('AVG', function($measurementItemNameId) use ($measurement) {
+        $executor->addFunction('avg', function($measurementItemNameId) use ($measurement) {
             // Get measurement results yang sudah ada
             $measurementResults = $measurement->measurement_results ?? [];
             
@@ -442,6 +442,77 @@ class ProductMeasurement extends Model
             
             // Return 0 if no data found
             return 0;
+        });
+        
+        // Register ALL standard math functions (lowercase)
+        // Note: MathExecutor already has some built-in functions, but we register explicitly for consistency
+        
+        // Trigonometric functions
+        $executor->addFunction('sin', function($x) { return sin($x); });
+        $executor->addFunction('cos', function($x) { return cos($x); });
+        $executor->addFunction('tan', function($x) { return tan($x); });
+        $executor->addFunction('asin', function($x) { return asin($x); });
+        $executor->addFunction('acos', function($x) { return acos($x); });
+        $executor->addFunction('atan', function($x) { return atan($x); });
+        $executor->addFunction('atan2', function($y, $x) { return atan2($y, $x); });
+        
+        // Hyperbolic functions
+        $executor->addFunction('sinh', function($x) { return sinh($x); });
+        $executor->addFunction('cosh', function($x) { return cosh($x); });
+        $executor->addFunction('tanh', function($x) { return tanh($x); });
+        $executor->addFunction('asinh', function($x) { return asinh($x); });
+        $executor->addFunction('acosh', function($x) { return acosh($x); });
+        $executor->addFunction('atanh', function($x) { return atanh($x); });
+        
+        // Rounding functions
+        $executor->addFunction('ceil', function($x) { return ceil($x); });
+        $executor->addFunction('floor', function($x) { return floor($x); });
+        $executor->addFunction('round', function($x, $precision = 0) { return round($x, $precision); });
+        $executor->addFunction('trunc', function($x) { return intval($x); });
+        
+        // Math functions
+        $executor->addFunction('sqrt', function($x) { return sqrt($x); });
+        $executor->addFunction('abs', function($x) { return abs($x); });
+        $executor->addFunction('sign', function($x) { return $x > 0 ? 1 : ($x < 0 ? -1 : 0); });
+        $executor->addFunction('fmod', function($x, $y) { return fmod($x, $y); });
+        $executor->addFunction('hypot', function($x, $y) { return hypot($x, $y); });
+        
+        // Logarithmic and exponential
+        $executor->addFunction('log', function($x) { return log($x); });
+        $executor->addFunction('ln', function($x) { return log($x); }); // Alias for log
+        $executor->addFunction('log10', function($x) { return log10($x); });
+        $executor->addFunction('log2', function($x) { return log($x, 2); });
+        $executor->addFunction('exp', function($x) { return exp($x); });
+        $executor->addFunction('pow', function($base, $exponent) { return pow($base, $exponent); });
+        $executor->addFunction('power', function($base, $exponent) { return pow($base, $exponent); }); // Alias
+        
+        // Aggregation functions
+        $executor->addFunction('sum', function(...$values) { 
+            return array_sum(is_array($values[0]) ? $values[0] : $values);
+        });
+        $executor->addFunction('min', function(...$values) { 
+            return min(is_array($values[0]) ? $values[0] : $values);
+        });
+        $executor->addFunction('max', function(...$values) { 
+            return max(is_array($values[0]) ? $values[0] : $values);
+        });
+        $executor->addFunction('count', function(...$values) { 
+            return count(is_array($values[0]) ? $values[0] : $values);
+        });
+        
+        // Degree/Radian conversion
+        $executor->addFunction('deg2rad', function($x) { return deg2rad($x); });
+        $executor->addFunction('rad2deg', function($x) { return rad2deg($x); });
+        $executor->addFunction('degrees', function($x) { return rad2deg($x); }); // Alias
+        $executor->addFunction('radians', function($x) { return deg2rad($x); }); // Alias
+        
+        // Constants
+        $executor->addFunction('pi', function() { return M_PI; });
+        $executor->addFunction('e', function() { return M_E; });
+        
+        // Conditional function
+        $executor->addFunction('if', function($condition, $ifTrue, $ifFalse) { 
+            return $condition ? $ifTrue : $ifFalse;
         });
     }
 
@@ -590,7 +661,7 @@ class ProductMeasurement extends Model
         // Register AVG function yang bisa handle measurement item dependencies
         $measurement = $this;
         
-        $executor->addFunction('AVG', function($measurementItemNameId) use ($measurement, $currentBatchData) {
+        $executor->addFunction('avg', function($measurementItemNameId) use ($measurement, $currentBatchData) {
             // Get measurement results yang sudah ada
             $measurementResults = $measurement->measurement_results ?? [];
             
@@ -645,7 +716,7 @@ class ProductMeasurement extends Model
         // Register AVG function yang bisa akses current batch data
         $measurement = $this;
         
-        $executor->addFunction('AVG', function($measurementItemNameId) use ($measurement, $currentBatchData) {
+        $executor->addFunction('avg', function($measurementItemNameId) use ($measurement, $currentBatchData) {
             // Prioritas 1: Cari di current batch data dulu
             if (isset($currentBatchData[$measurementItemNameId])) {
                 $samples = $currentBatchData[$measurementItemNameId]['samples'] ?? [];

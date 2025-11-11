@@ -31,12 +31,18 @@ Route::prefix('v1')->group(function () {
         });
 
         // Product routes - Admin and SuperAdmin can CRUD
-        Route::middleware('role:admin,superadmin')->prefix('products')->group(function () {
-            Route::post('/', [ProductController::class, 'store']);
-            Route::get('/', [ProductController::class, 'index']);
-            Route::get('/is-product-exists', [ProductController::class, 'checkProductExists']);
-            Route::get('/categories', [ProductController::class, 'getProductCategories']);
-            Route::get('/{productId}', [ProductController::class, 'show']);
+        Route::prefix('products')->group(function () {
+            // Autocomplete endpoint - available for all authenticated users
+            Route::get('/{productId}/measurement-items/suggest', [ProductController::class, 'suggestMeasurementItems']);
+            
+            // Admin and SuperAdmin only routes
+            Route::middleware('role:admin,superadmin')->group(function () {
+                Route::post('/', [ProductController::class, 'store']);
+                Route::get('/', [ProductController::class, 'index']);
+                Route::get('/is-product-exists', [ProductController::class, 'checkProductExists']);
+                Route::get('/categories', [ProductController::class, 'getProductCategories']);
+                Route::get('/{productId}', [ProductController::class, 'show']);
+            });
         });
 
         // Product Measurement routes - available for authenticated users
