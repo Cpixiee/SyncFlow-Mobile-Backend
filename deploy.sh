@@ -27,8 +27,9 @@ SERVER_USER="root"
 SERVER_PATH="/root/SyncFlow"
 CONTAINER_NAME="syncflow-api"
 
-# SSH Options (auto accept host keys)
-SSH_OPTS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+# SSH Configuration - Reuse connection to avoid multiple password prompts
+SSH_CONTROL_PATH="/tmp/ssh-syncflow-deploy-%r@%h:%p"
+SSH_OPTIONS="-o ControlMaster=auto -o ControlPath=$SSH_CONTROL_PATH -o ControlPersist=10m -o StrictHostKeyChecking=no"
 
 echo -e "${BLUE}🚀 SyncFlow API - Automated Deployment${NC}"
 echo "======================================"
@@ -38,12 +39,20 @@ echo "Path: $SERVER_PATH"
 echo "Container: $CONTAINER_NAME"
 echo ""
 
-# Function to run command on server
+# Function to run command on server (with connection reuse)
 run_on_server() {
-    ssh $SSH_OPTS $SERVER_USER@$SERVER_IP "$1"
+    ssh $SSH_OPTIONS $SERVER_USER@$SERVER_IP "$1"
 }
 
-# Function to check container status
+# Function to cleanup SSH control connection
+cleanup_ssh() {
+    ssh -O exit $SSH_OPTIONS $SERVER_USER@$SERVER_IP 2>/dev/null || true
+}
+
+# Trap to cleanup on exit
+trap cleanup_ssh EXIT
+
+# Function to check if container is running
 check_container() {
     if run_on_server "docker ps | grep -q $CONTAINER_NAME"; then
         echo -e "${GREEN}✅ Container $CONTAINER_NAME is running${NC}"
@@ -54,13 +63,25 @@ check_container() {
     fi
 }
 
+# Step 0: Check if SSH key is setup
+echo -e "${YELLOW}🔑 Checking SSH authentication...${NC}"
+if ! ssh-add -l &>/dev/null; then
+    echo -e "${YELLOW}⚠️  SSH agent not running or no keys loaded${NC}"
+    echo -e "${BLUE}💡 Tip: Setup SSH key for passwordless login:${NC}"
+    echo "  1. Generate key: ssh-keygen -t rsa -b 4096"
+    echo "  2. Copy to server: ssh-copy-id $SERVER_USER@$SERVER_IP"
+    echo ""
+fi
+
 # Step 1: Check server connection
-echo -e "${YELLOW}🔍 Checking server connection...${NC}"
-if ! ssh $SSH_OPTS -o ConnectTimeout=10 $SERVER_USER@$SERVER_IP "echo 'Server connection OK'"; then
+echo -e "${YELLOW}🔍 Establishing connection to server...${NC}"
+if ! ssh $SSH_OPTIONS -o ConnectTimeout=10 $SERVER_USER@$SERVER_IP "echo 'Server connection OK'"; then
     echo -e "${RED}❌ Cannot connect to server $SERVER_IP${NC}"
+    echo -e "${YELLOW}💡 Setup SSH key to avoid password prompts:${NC}"
+    echo "   ssh-copy-id $SERVER_USER@$SERVER_IP"
     exit 1
 fi
-echo -e "${GREEN}✅ Server connection OK${NC}"
+echo -e "${GREEN}✅ Server connection established (password only needed once)${NC}"
 
 # Step 2: Check Docker container
 echo -e "${YELLOW}🔍 Checking Docker container...${NC}"
@@ -126,7 +147,11 @@ else
     echo -e "${YELLOW}⚠️  API health check failed, but deployment completed${NC}"
 fi
 
-# Step 13: Summary
+# Step 13: Cleanup SSH connection
+echo -e "${YELLOW}🧹 Cleaning up SSH connection...${NC}"
+cleanup_ssh
+
+# Step 14: Summary
 echo ""
 echo -e "${GREEN}🎉 Deployment completed successfully!${NC}"
 echo -e "${BLUE}📊 Deployment Summary:${NC}"
@@ -139,5 +164,8 @@ echo -e "${YELLOW}💡 Next steps:${NC}"
 echo "• Test API endpoints with Postman"
 echo "• Check logs: docker logs $CONTAINER_NAME"
 echo "• Monitor container: docker ps"
+echo ""
+echo -e "${YELLOW}🔐 To avoid password prompt next time:${NC}"
+echo "   Run: ssh-copy-id $SERVER_USER@$SERVER_IP"
 echo ""
 echo -e "${GREEN}✨ Your team can now test the updated API!${NC}"
