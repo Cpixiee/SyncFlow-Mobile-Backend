@@ -559,9 +559,13 @@ class ProductController extends Controller
             if (isset($point['pre_processing_formulas']) && is_array($point['pre_processing_formulas'])) {
                 foreach ($point['pre_processing_formulas'] as $formulaIndex => &$formula) {
                     if (isset($formula['formula'])) {
+                        // For pre-processing formulas, can reference current measurement item's raw data
+                        // and other measurement items defined before
+                        $preProcessingAvailableIds = array_merge($availableIds, [$point['setup']['name_id']]);
+                        
                         $formulaErrors = $this->validateSingleFormula(
                             $formula['formula'],
-                            $availableIds,
+                            $preProcessingAvailableIds,
                             "{$pointPrefix}.pre_processing_formula_{$formulaIndex}"
                         );
                         

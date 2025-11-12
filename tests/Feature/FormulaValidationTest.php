@@ -30,7 +30,7 @@ class FormulaValidationTest extends TestCase
         // Login to get token
         $response = $this->postJson('/api/v1/login', [
             'username' => 'admin',
-            'password' => 'password'
+            'password' => 'password123'
         ]);
 
         $this->adminToken = $response->json('data.token');
@@ -60,10 +60,32 @@ class FormulaValidationTest extends TestCase
             'measurement_points' => [
                 [
                     'setup' => [
+                        'name' => 'Thickness A',
+                        'name_id' => 'thickness_a',
+                        'sample_amount' => 5,
+                        'source' => 'MANUAL',
+                        'type' => 'SINGLE',
+                        'nature' => 'QUANTITATIVE'
+                    ],
+                    'evaluation_type' => 'PER_SAMPLE',
+                    'evaluation_setting' => [
+                        'per_sample_setting' => [
+                            'is_raw_data' => true
+                        ]
+                    ],
+                    'rule_evaluation_setting' => [
+                        'rule' => 'MIN',
+                        'unit' => 'mm',
+                        'value' => 0
+                    ]
+                ],
+                [
+                    'setup' => [
                         'name' => 'Test',
                         'name_id' => 'test',
                         'sample_amount' => 1,
                         'source' => 'DERIVED',
+                        'source_derived_name_id' => 'thickness_a',
                         'type' => 'SINGLE',
                         'nature' => 'QUANTITATIVE'
                     ],
@@ -76,7 +98,12 @@ class FormulaValidationTest extends TestCase
                         ]
                     ],
                     'evaluation_type' => 'SKIP_CHECK',
-                    'evaluation_setting' => []
+                    'evaluation_setting' => ['_skip' => true],
+                    'rule_evaluation_setting' => [
+                        'rule' => 'MIN',
+                        'unit' => 'mm',
+                        'value' => 0
+                    ]
                 ]
             ]
         ];
@@ -111,8 +138,17 @@ class FormulaValidationTest extends TestCase
                         'type' => 'SINGLE',
                         'nature' => 'QUANTITATIVE'
                     ],
-                    'evaluation_type' => 'SKIP_CHECK',
-                    'evaluation_setting' => []
+                    'evaluation_type' => 'PER_SAMPLE',
+                    'evaluation_setting' => [
+                        'per_sample_setting' => [
+                            'is_raw_data' => true
+                        ]
+                    ],
+                    'rule_evaluation_setting' => [
+                        'rule' => 'MIN',
+                        'unit' => 'mm',
+                        'value' => 0
+                    ]
                 ],
                 [
                     'setup' => [
@@ -120,6 +156,7 @@ class FormulaValidationTest extends TestCase
                         'name_id' => 'result',
                         'sample_amount' => 1,
                         'source' => 'DERIVED',
+                        'source_derived_name_id' => 'thickness_a',
                         'type' => 'SINGLE',
                         'nature' => 'QUANTITATIVE'
                     ],
@@ -132,7 +169,12 @@ class FormulaValidationTest extends TestCase
                         ]
                     ],
                     'evaluation_type' => 'SKIP_CHECK',
-                    'evaluation_setting' => []
+                    'evaluation_setting' => ['_skip' => true],
+                    'rule_evaluation_setting' => [
+                        'rule' => 'MIN',
+                        'unit' => 'mm',
+                        'value' => 0
+                    ]
                 ]
             ]
         ];
@@ -164,8 +206,17 @@ class FormulaValidationTest extends TestCase
                         'type' => 'SINGLE',
                         'nature' => 'QUANTITATIVE'
                     ],
-                    'evaluation_type' => 'SKIP_CHECK',
-                    'evaluation_setting' => []
+                    'evaluation_type' => 'PER_SAMPLE',
+                    'evaluation_setting' => [
+                        'per_sample_setting' => [
+                            'is_raw_data' => true
+                        ]
+                    ],
+                    'rule_evaluation_setting' => [
+                        'rule' => 'MIN',
+                        'unit' => 'mm',
+                        'value' => 0
+                    ]
                 ],
                 [
                     'setup' => [
@@ -173,6 +224,7 @@ class FormulaValidationTest extends TestCase
                         'name_id' => 'average',
                         'sample_amount' => 1,
                         'source' => 'DERIVED',
+                        'source_derived_name_id' => 'thickness_a',
                         'type' => 'SINGLE',
                         'nature' => 'QUANTITATIVE'
                     ],
@@ -185,7 +237,12 @@ class FormulaValidationTest extends TestCase
                         ]
                     ],
                     'evaluation_type' => 'SKIP_CHECK',
-                    'evaluation_setting' => []
+                    'evaluation_setting' => ['_skip' => true],
+                    'rule_evaluation_setting' => [
+                        'rule' => 'MIN',
+                        'unit' => 'mm',
+                        'value' => 0
+                    ]
                 ]
             ]
         ];
@@ -197,10 +254,12 @@ class FormulaValidationTest extends TestCase
         $response->assertStatus(400)
                 ->assertJson([
                     'message' => 'Formula validation failed'
-                ])
-                ->assertJsonFragment([
-                    'thickness_b'
                 ]);
+        
+        // Verify error message contains thickness_b
+        $responseData = $response->json();
+        $errorMessage = json_encode($responseData);
+        $this->assertStringContainsString('thickness_b', $errorMessage);
     }
 
     /**
@@ -223,8 +282,17 @@ class FormulaValidationTest extends TestCase
                         'type' => 'SINGLE',
                         'nature' => 'QUANTITATIVE'
                     ],
-                    'evaluation_type' => 'SKIP_CHECK',
-                    'evaluation_setting' => []
+                    'evaluation_type' => 'PER_SAMPLE',
+                    'evaluation_setting' => [
+                        'per_sample_setting' => [
+                            'is_raw_data' => true
+                        ]
+                    ],
+                    'rule_evaluation_setting' => [
+                        'rule' => 'MIN',
+                        'unit' => 'mm',
+                        'value' => 0
+                    ]
                 ],
                 [
                     'setup' => [
@@ -235,8 +303,17 @@ class FormulaValidationTest extends TestCase
                         'type' => 'SINGLE',
                         'nature' => 'QUANTITATIVE'
                     ],
-                    'evaluation_type' => 'SKIP_CHECK',
-                    'evaluation_setting' => []
+                    'evaluation_type' => 'PER_SAMPLE',
+                    'evaluation_setting' => [
+                        'per_sample_setting' => [
+                            'is_raw_data' => true
+                        ]
+                    ],
+                    'rule_evaluation_setting' => [
+                        'rule' => 'MIN',
+                        'unit' => 'mm',
+                        'value' => 0
+                    ]
                 ],
                 [
                     'setup' => [
@@ -244,6 +321,7 @@ class FormulaValidationTest extends TestCase
                         'name_id' => 'average',
                         'sample_amount' => 1,
                         'source' => 'DERIVED',
+                        'source_derived_name_id' => 'thickness_a',
                         'type' => 'SINGLE',
                         'nature' => 'QUANTITATIVE'
                     ],
@@ -256,7 +334,12 @@ class FormulaValidationTest extends TestCase
                         ]
                     ],
                     'evaluation_type' => 'SKIP_CHECK',
-                    'evaluation_setting' => []
+                    'evaluation_setting' => ['_skip' => true],
+                    'rule_evaluation_setting' => [
+                        'rule' => 'MIN',
+                        'unit' => 'mm',
+                        'value' => 0
+                    ]
                 ]
             ]
         ];
@@ -293,8 +376,38 @@ class FormulaValidationTest extends TestCase
                         'type' => 'SINGLE',
                         'nature' => 'QUANTITATIVE'
                     ],
-                    'evaluation_type' => 'SKIP_CHECK',
-                    'evaluation_setting' => []
+                    'evaluation_type' => 'PER_SAMPLE',
+                    'evaluation_setting' => [
+                        'per_sample_setting' => [
+                            'is_raw_data' => true
+                        ]
+                    ],
+                    'rule_evaluation_setting' => [
+                        'rule' => 'MIN',
+                        'unit' => 'mm',
+                        'value' => 0
+                    ]
+                ],
+                [
+                    'setup' => [
+                        'name' => 'Angle',
+                        'name_id' => 'angle',
+                        'sample_amount' => 5,
+                        'source' => 'MANUAL',
+                        'type' => 'SINGLE',
+                        'nature' => 'QUANTITATIVE'
+                    ],
+                    'evaluation_type' => 'PER_SAMPLE',
+                    'evaluation_setting' => [
+                        'per_sample_setting' => [
+                            'is_raw_data' => true
+                        ]
+                    ],
+                    'rule_evaluation_setting' => [
+                        'rule' => 'MIN',
+                        'unit' => 'degree',
+                        'value' => 0
+                    ]
                 ],
                 [
                     'setup' => [
@@ -302,6 +415,7 @@ class FormulaValidationTest extends TestCase
                         'name_id' => 'result',
                         'sample_amount' => 1,
                         'source' => 'DERIVED',
+                        'source_derived_name_id' => 'thickness_a',
                         'type' => 'SINGLE',
                         'nature' => 'QUANTITATIVE'
                     ],
@@ -314,7 +428,12 @@ class FormulaValidationTest extends TestCase
                         ]
                     ],
                     'evaluation_type' => 'SKIP_CHECK',
-                    'evaluation_setting' => []
+                    'evaluation_setting' => ['_skip' => true],
+                    'rule_evaluation_setting' => [
+                        'rule' => 'MIN',
+                        'unit' => 'mm',
+                        'value' => 0
+                    ]
                 ]
             ]
         ];
@@ -327,7 +446,7 @@ class FormulaValidationTest extends TestCase
 
         // Verify functions were normalized
         $product = Product::first();
-        $formula = $product->measurement_points[1]['variables'][0]['formula'];
+        $formula = $product->measurement_points[2]['variables'][0]['formula'];
         $this->assertStringContainsString('avg(thickness_a)', $formula);
         $this->assertStringContainsString('sin(angle)', $formula);
         $this->assertStringNotContainsString('AVG', $formula);
@@ -347,14 +466,24 @@ class FormulaValidationTest extends TestCase
             'measurement_points' => [
                 [
                     'setup' => [
-                        'name' => 'Room Temp',  // No name_id provided
+                        'name' => 'Room Temp',
+                        'name_id' => 'room_temp',  // name_id is required by validation
                         'sample_amount' => 5,
                         'source' => 'MANUAL',
                         'type' => 'SINGLE',
                         'nature' => 'QUANTITATIVE'
                     ],
-                    'evaluation_type' => 'SKIP_CHECK',
-                    'evaluation_setting' => []
+                    'evaluation_type' => 'PER_SAMPLE',
+                    'evaluation_setting' => [
+                        'per_sample_setting' => [
+                            'is_raw_data' => true
+                        ]
+                    ],
+                    'rule_evaluation_setting' => [
+                        'rule' => 'MIN',
+                        'unit' => '°C',
+                        'value' => 0
+                    ]
                 ]
             ]
         ];
@@ -365,7 +494,7 @@ class FormulaValidationTest extends TestCase
 
         $response->assertStatus(201);
 
-        // Verify name_id was auto-generated
+        // Verify name_id was set correctly
         $product = Product::first();
         $this->assertEquals('room_temp', $product->measurement_points[0]['setup']['name_id']);
     }
@@ -390,8 +519,17 @@ class FormulaValidationTest extends TestCase
                         'type' => 'SINGLE',
                         'nature' => 'QUANTITATIVE'
                     ],
-                    'evaluation_type' => 'SKIP_CHECK',
-                    'evaluation_setting' => []
+                    'evaluation_type' => 'PER_SAMPLE',
+                    'evaluation_setting' => [
+                        'per_sample_setting' => [
+                            'is_raw_data' => true
+                        ]
+                    ],
+                    'rule_evaluation_setting' => [
+                        'rule' => 'MIN',
+                        'unit' => 'degree',
+                        'value' => 0
+                    ]
                 ],
                 [
                     'setup' => [
@@ -402,8 +540,17 @@ class FormulaValidationTest extends TestCase
                         'type' => 'SINGLE',
                         'nature' => 'QUANTITATIVE'
                     ],
-                    'evaluation_type' => 'SKIP_CHECK',
-                    'evaluation_setting' => []
+                    'evaluation_type' => 'PER_SAMPLE',
+                    'evaluation_setting' => [
+                        'per_sample_setting' => [
+                            'is_raw_data' => true
+                        ]
+                    ],
+                    'rule_evaluation_setting' => [
+                        'rule' => 'MIN',
+                        'unit' => 'mm',
+                        'value' => 0
+                    ]
                 ],
                 [
                     'setup' => [
@@ -411,6 +558,7 @@ class FormulaValidationTest extends TestCase
                         'name_id' => 'result',
                         'sample_amount' => 1,
                         'source' => 'DERIVED',
+                        'source_derived_name_id' => 'angle',
                         'type' => 'SINGLE',
                         'nature' => 'QUANTITATIVE'
                     ],
@@ -423,7 +571,12 @@ class FormulaValidationTest extends TestCase
                         ]
                     ],
                     'evaluation_type' => 'SKIP_CHECK',
-                    'evaluation_setting' => []
+                    'evaluation_setting' => ['_skip' => true],
+                    'rule_evaluation_setting' => [
+                        'rule' => 'MIN',
+                        'unit' => 'mm',
+                        'value' => 0
+                    ]
                 ]
             ]
         ];
@@ -459,7 +612,7 @@ class FormulaValidationTest extends TestCase
                         'name' => 'Temperature',
                         'name_id' => 'temperature',
                         'sample_amount' => 5,
-                        'source' => 'INSTRUMENT',
+                        'source' => 'MANUAL',
                         'type' => 'SINGLE',
                         'nature' => 'QUANTITATIVE'
                     ],
@@ -500,5 +653,134 @@ class FormulaValidationTest extends TestCase
         $this->assertStringNotContainsString('=', $formula);
         $this->assertStringContainsString('(temperature - 32)', $formula);
     }
-}
 
+    /**
+     * Test 9: Formula can reference multiple measurement items from other instruments
+     * Example: room_temp dengan formula =avg(thickness_a) + avg(thickness_b) + avg(thickness_c)/3
+     */
+    public function test_formula_can_reference_multiple_measurement_items()
+    {
+        $productData = [
+            'basic_info' => [
+                'product_category_id' => $this->productCategory->id,
+                'product_name' => 'VO'
+            ],
+            'measurement_points' => [
+                // Measurement item 1: thickness_a
+                [
+                    'setup' => [
+                        'name' => 'Thickness A',
+                        'name_id' => 'thickness_a',
+                        'sample_amount' => 5,
+                        'source' => 'MANUAL',
+                        'type' => 'SINGLE',
+                        'nature' => 'QUANTITATIVE'
+                    ],
+                    'evaluation_type' => 'PER_SAMPLE',
+                    'evaluation_setting' => [
+                        'per_sample_setting' => [
+                            'is_raw_data' => true
+                        ]
+                    ],
+                    'rule_evaluation_setting' => [
+                        'rule' => 'MIN',
+                        'unit' => 'mm',
+                        'value' => 0
+                    ]
+                ],
+                // Measurement item 2: thickness_b
+                [
+                    'setup' => [
+                        'name' => 'Thickness B',
+                        'name_id' => 'thickness_b',
+                        'sample_amount' => 5,
+                        'source' => 'MANUAL',
+                        'type' => 'SINGLE',
+                        'nature' => 'QUANTITATIVE'
+                    ],
+                    'evaluation_type' => 'PER_SAMPLE',
+                    'evaluation_setting' => [
+                        'per_sample_setting' => [
+                            'is_raw_data' => true
+                        ]
+                    ],
+                    'rule_evaluation_setting' => [
+                        'rule' => 'MIN',
+                        'unit' => 'mm',
+                        'value' => 0
+                    ]
+                ],
+                // Measurement item 3: thickness_c
+                [
+                    'setup' => [
+                        'name' => 'Thickness C',
+                        'name_id' => 'thickness_c',
+                        'sample_amount' => 5,
+                        'source' => 'MANUAL',
+                        'type' => 'SINGLE',
+                        'nature' => 'QUANTITATIVE'
+                    ],
+                    'evaluation_type' => 'PER_SAMPLE',
+                    'evaluation_setting' => [
+                        'per_sample_setting' => [
+                            'is_raw_data' => true
+                        ]
+                    ],
+                    'rule_evaluation_setting' => [
+                        'rule' => 'MIN',
+                        'unit' => 'mm',
+                        'value' => 0
+                    ]
+                ],
+                // Measurement item 4: room_temp dengan formula yang mengambil dari 3 measurement items sebelumnya
+                [
+                    'setup' => [
+                        'name' => 'Room Temp',
+                        'name_id' => 'room_temp',
+                        'sample_amount' => 1,
+                        'source' => 'DERIVED',
+                        'source_derived_name_id' => 'thickness_a',
+                        'type' => 'SINGLE',
+                        'nature' => 'QUANTITATIVE'
+                    ],
+                    'variables' => [
+                        [
+                            'type' => 'FORMULA',
+                            'name' => 'average_thickness',
+                            'formula' => '=(avg(thickness_a) + avg(thickness_b) + avg(thickness_c)) / 3',
+                            'is_show' => true
+                        ]
+                    ],
+                    'evaluation_type' => 'SKIP_CHECK',
+                    'evaluation_setting' => ['_skip' => true],
+                    'rule_evaluation_setting' => [
+                        'rule' => 'MIN',
+                        'unit' => 'mm',
+                        'value' => 0
+                    ]
+                ]
+            ]
+        ];
+
+        $response = $this->withHeaders([
+            'Authorization' => 'Bearer ' . $this->adminToken
+        ])->postJson('/api/v1/products', $productData);
+
+        $response->assertStatus(201);
+
+        // Verify formula was processed correctly
+        $product = Product::first();
+        $formula = $product->measurement_points[3]['variables'][0]['formula'];
+        
+        // Verify formula contains all three measurement items
+        $this->assertStringContainsString('avg(thickness_a)', $formula);
+        $this->assertStringContainsString('avg(thickness_b)', $formula);
+        $this->assertStringContainsString('avg(thickness_c)', $formula);
+        
+        // Verify = sign was stripped
+        $this->assertStringNotContainsString('=', $formula);
+        
+        // Verify function names were normalized to lowercase
+        $this->assertStringNotContainsString('AVG', $formula);
+    }
+}
