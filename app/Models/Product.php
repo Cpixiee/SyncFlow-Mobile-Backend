@@ -116,7 +116,15 @@ class Product extends Model
         }
 
         $setup = $point['setup'];
-        $requiredSetupFields = ['name', 'name_id', 'sample_amount', 'source', 'type', 'nature'];
+        
+        // Base required fields
+        $requiredSetupFields = ['name', 'name_id', 'sample_amount', 'nature'];
+        
+        // Add source and type as required only if nature is QUANTITATIVE
+        if (isset($setup['nature']) && $setup['nature'] === 'QUANTITATIVE') {
+            $requiredSetupFields[] = 'source';
+            $requiredSetupFields[] = 'type';
+        }
         
         foreach ($requiredSetupFields as $field) {
             if (!isset($setup[$field]) || empty($setup[$field])) {

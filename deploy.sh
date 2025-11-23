@@ -123,7 +123,28 @@ echo -e "${YELLOW}🗃️  Running database migrations...${NC}"
 run_on_server "docker exec $CONTAINER_NAME php artisan migrate --force"
 
 echo -e "${YELLOW}🌱 Running database seeders...${NC}"
+echo -e "${BLUE}  → Seeding Quarters...${NC}"
+run_on_server "docker exec $CONTAINER_NAME php artisan db:seed --class=QuarterSeeder --force"
+
+echo -e "${BLUE}  → Seeding Product Categories...${NC}"
+run_on_server "docker exec $CONTAINER_NAME php artisan db:seed --class=ProductCategorySeeder --force"
+
+echo -e "${BLUE}  → Seeding Measurement Instruments...${NC}"
+run_on_server "docker exec $CONTAINER_NAME php artisan db:seed --class=MeasurementInstrumentSeeder --force"
+
+echo -e "${BLUE}  → Seeding Tools...${NC}"
+run_on_server "docker exec $CONTAINER_NAME php artisan db:seed --class=ToolSeeder --force"
+
+echo -e "${BLUE}  → Seeding Super Admin User...${NC}"
 run_on_server "docker exec $CONTAINER_NAME php artisan db:seed --class=SuperAdminSeeder --force"
+
+echo -e "${BLUE}  → Seeding Login Users...${NC}"
+run_on_server "docker exec $CONTAINER_NAME php artisan db:seed --class=LoginUserSeeder --force"
+
+# Step 8b: Activate Quarter (IMPORTANT!)
+echo -e "${YELLOW}📅 Activating Quarter...${NC}"
+# Activate Q4 2024 as default active quarter
+run_on_server "docker exec $CONTAINER_NAME php artisan tinker --execute=\"\\\$quarter = App\\\\Models\\\\Quarter::where('year', 2024)->where('name', 'Q4')->first(); if(\\\$quarter) { \\\$quarter->setAsActive(); echo 'Q4 2024 activated'; } else { echo 'Quarter not found'; }\""
 
 # Step 9: Optimize Laravel for production
 echo -e "${YELLOW}🚀 Optimizing for production...${NC}"

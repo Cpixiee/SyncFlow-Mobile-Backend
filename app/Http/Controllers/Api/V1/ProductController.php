@@ -37,12 +37,14 @@ class ProductController extends Controller
                 'measurement_points.*.setup.name' => 'required|string',
                 'measurement_points.*.setup.name_id' => 'required|string|regex:/^[a-zA-Z_]+$/',
                 'measurement_points.*.setup.sample_amount' => 'required|integer|min:1',
-                'measurement_points.*.setup.source' => 'required|in:INSTRUMENT,MANUAL,DERIVED,TOOL',
+                'measurement_points.*.setup.nature' => 'required|in:QUALITATIVE,QUANTITATIVE',
+                
+                // source and type are optional for QUALITATIVE, but validated conditionally below
+                'measurement_points.*.setup.source' => 'nullable|in:INSTRUMENT,MANUAL,DERIVED,TOOL',
                 'measurement_points.*.setup.source_instrument_id' => 'required_if:measurement_points.*.setup.source,INSTRUMENT|nullable|integer|exists:measurement_instruments,id',
                 'measurement_points.*.setup.source_derived_name_id' => 'required_if:measurement_points.*.setup.source,DERIVED|nullable|string',
                 'measurement_points.*.setup.source_tool_model' => 'required_if:measurement_points.*.setup.source,TOOL|nullable|string',
-                'measurement_points.*.setup.type' => 'required|in:SINGLE,BEFORE_AFTER',
-                'measurement_points.*.setup.nature' => 'required|in:QUALITATIVE,QUANTITATIVE',
+                'measurement_points.*.setup.type' => 'nullable|in:SINGLE,BEFORE_AFTER',
                 
                 // Variables
                 'measurement_points.*.variables' => 'nullable|array',
@@ -110,12 +112,18 @@ class ProductController extends Controller
             }
 
             // Process measurement groups if provided
-            $processedMeasurementPoints = $this->processMeasurementGrouping($measurementPoints, $measurementGroups);
+            $processedMeasurementPoints = $this->processMeasurementGrouping($measurementPoints, $measurementGroups ?? []);
 
-            // Additional validation for measurement points
+            // Additional validation for measurement points (includes nature-specific validations)
             $validationErrors = $this->validateMeasurementPoints($measurementPoints);
             if (!empty($validationErrors)) {
                 return $this->errorResponse('Measurement points validation failed', 'MEASUREMENT_VALIDATION_ERROR', 400, $validationErrors);
+            }
+            
+            // Validate source and type are required for QUANTITATIVE
+            $quantitativeErrors = $this->validateQuantitativeRequirements($measurementPoints);
+            if (!empty($quantitativeErrors)) {
+                return $this->errorResponse('QUANTITATIVE measurement validation failed', 'QUANTITATIVE_VALIDATION_ERROR', 400, $quantitativeErrors);
             }
 
             // Validate name uniqueness across variables, pre_processing_formulas, and joint_setting formulas
@@ -731,6 +739,32 @@ class ProductController extends Controller
             foreach ($allNames as $name) {
                 if (!preg_match('/^[a-zA-Z_]+$/', $name)) {
                     $errors["measurement_point_{$pointIndex}"] = "Invalid name format: {$name}. Only alphabet and underscore allowed.";
+                }
+            }
+        }
+        
+        return $errors;
+    }
+
+    /**
+     * Validate QUANTITATIVE measurements have required source and type
+     */
+    private function validateQuantitativeRequirements(array $measurementPoints): array
+    {
+        $errors = [];
+        
+        foreach ($measurementPoints as $index => $point) {
+            $setup = $point['setup'] ?? [];
+            $nature = $setup['nature'] ?? '';
+            
+            // For QUANTITATIVE, source and type must be present
+            if ($nature === 'QUANTITATIVE') {
+                if (!isset($setup['source']) || empty($setup['source'])) {
+                    $errors["measurement_points.{$index}.setup.source"] = 'Source is required for QUANTITATIVE nature';
+                }
+                
+                if (!isset($setup['type']) || empty($setup['type'])) {
+                    $errors["measurement_points.{$index}.setup.type"] = 'Type is required for QUANTITATIVE nature';
                 }
             }
         }

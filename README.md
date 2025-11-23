@@ -108,17 +108,42 @@ DB_PASSWORD=
 php artisan migrate
 ```
 
-8. **Seed database (optional)**
+8. **Seed database (REQUIRED)**
 ```bash
-# Seed all
-php artisan db:seed
+# Seed quarters (REQUIRED - products need active quarter)
+php artisan db:seed --class=QuarterSeeder
 
-# Or seed specific seeders
+# Seed product categories (REQUIRED)
+php artisan db:seed --class=ProductCategorySeeder
+
+# Seed measurement instruments (REQUIRED for INSTRUMENT source)
+php artisan db:seed --class=MeasurementInstrumentSeeder
+
+# Seed tools (REQUIRED for TOOL source)
 php artisan db:seed --class=ToolSeeder
-php artisan db:seed --class=IssueSeeder
+
+# Seed super admin user (REQUIRED for first login)
+php artisan db:seed --class=SuperAdminSeeder
+
+# Seed additional users (OPTIONAL)
+php artisan db:seed --class=LoginUserSeeder
+
+# Or seed all at once
+php artisan db:seed
 ```
 
-9. **Start the server**
+9. **Activate Quarter (REQUIRED)**
+```bash
+# Interactive mode - will show available quarters
+php artisan quarter:activate
+
+# Or direct mode - activate specific quarter
+php artisan quarter:activate 2024 Q4
+```
+
+> ⚠️ **Important:** Products cannot be created without an active quarter!
+
+10. **Start the server**
 ```bash
 php artisan serve
 ```
@@ -231,11 +256,15 @@ POST /api/v1/login
 | POST | `/api/v1/products` | Create product | Admin/SuperAdmin |
 | GET | `/api/v1/products` | List products | Admin/SuperAdmin |
 | GET | `/api/v1/products/{id}` | Get product detail | Admin/SuperAdmin |
+| GET | `/api/v1/products/categories` | Get product categories | Admin/SuperAdmin |
 | GET | `/api/v1/products/{id}/measurement-items/suggest` | Autocomplete | All |
 | **Measurements** ||||
 | POST | `/api/v1/product-measurement` | Create measurement | All |
 | GET | `/api/v1/product-measurement` | List measurements | All |
 | POST | `/api/v1/product-measurement/{id}/submit` | Submit measurement | All |
+| **Instruments** ||||
+| GET | `/api/v1/measurement-instruments` | List instruments | All |
+| GET | `/api/v1/measurement-instruments/{id}` | Get instrument detail | All |
 | **Tools** ||||
 | GET | `/api/v1/tools` | List tools | All |
 | GET | `/api/v1/tools/models` | Get tool models | All |
@@ -308,8 +337,45 @@ The formula system uses **NXP MathExecutor** library:
 ## 📖 Detailed Documentation
 
 - **[Formula System Documentation](FORMULA_SYSTEM_DOCUMENTATION.md)** - Complete formula guide with examples
-- **[Tools API Documentation](TOOLS_API_DOCUMENTATION.md)** - Tools & instruments management
+- **[Tools Logic Explanation](TOOLS_LOGIC_EXPLANATION.md)** - Tools & instruments management
 - **[Issue API Documentation](ISSUE_API_DOCUMENTATION.md)** - Issue tracking system
+
+## ⚙️ Important Commands
+
+### Quarter Management
+```bash
+# Activate a quarter (interactive)
+php artisan quarter:activate
+
+# Activate specific quarter
+php artisan quarter:activate 2024 Q4
+
+# Check active quarter via tinker
+php artisan tinker
+>>> App\Models\Quarter::getActiveQuarter();
+```
+
+### Database Seeding
+```bash
+# Seed all required data
+php artisan db:seed
+
+# Or seed individually
+php artisan db:seed --class=QuarterSeeder
+php artisan db:seed --class=ProductCategorySeeder
+php artisan db:seed --class=MeasurementInstrumentSeeder
+php artisan db:seed --class=ToolSeeder
+php artisan db:seed --class=SuperAdminSeeder
+php artisan db:seed --class=LoginUserSeeder
+```
+
+### Fresh Install
+```bash
+# Complete fresh installation
+php artisan migrate:fresh
+php artisan db:seed
+php artisan quarter:activate 2024 Q4
+```
 
 ---
 
@@ -403,28 +469,67 @@ stdout_logfile=/path/to/syncflow/storage/logs/worker.log
 
 ### Common Issues
 
-**1. Formula validation errors**
+**1. Error: "Tidak ada quarter aktif" / "No active quarter"**
+```bash
+# Solution: Activate a quarter
+php artisan quarter:activate
+
+# Or check current status
+php artisan tinker
+>>> App\Models\Quarter::getActiveQuarter();
+
+# If no quarters exist, seed them first
+php artisan db:seed --class=QuarterSeeder
+```
+
+**2. Error: "source_instrument_id must be integer"**
+```
+Problem: Sending tool model name instead of instrument ID
+
+Solution: 
+1. Fetch instruments from: GET /api/v1/measurement-instruments
+2. Use the 'id' field (integer), not 'model' field (string)
+3. Example: source_instrument_id: 1 (not "MITUTOYO-DC-150")
+```
+
+**3. Error: "Setup.source wajib diisi" for QUALITATIVE**
+```
+Problem: Old validation rules
+
+Solution: Update to latest code. 
+For QUALITATIVE measurements, source and type are now OPTIONAL.
+```
+
+**4. Formula validation errors**
 ```
 Error: "Formula harus dimulai dengan '='"
 Solution: Add = prefix to your formula (e.g., =avg(thickness_a))
 ```
 
-**2. Missing dependency in formula**
+**5. Missing dependency in formula**
 ```
 Error: "Formula references measurement items yang belum dibuat"
 Solution: Ensure referenced measurement items are defined before the formula
 ```
 
-**3. JWT token expired**
+**6. JWT token expired**
 ```
 Error: "Token has expired"
 Solution: Use refresh token endpoint to get new token
 POST /api/v1/refresh
 ```
 
-**4. Database connection error**
+**7. Database connection error**
 ```
 Solution: Check .env database credentials and ensure MySQL is running
+```
+
+**8. Laravel serve error on Windows**
+```
+Error: "Undefined array key 1" in ServeCommand.php
+
+Solution: This is a known Laravel bug on Windows and doesn't affect functionality.
+The server still works normally. Ignore the error or use Laragon/XAMPP instead.
 ```
 
 ---
@@ -494,9 +599,44 @@ For support, email support@syncflow.com or open an issue in the GitHub repositor
 
 ---
 
+## 📌 Important Notes
+
+### Product Creation Requirements
+
+**1. Active Quarter Required**
+- Products MUST have an active quarter to be created
+- Run `php artisan quarter:activate` before creating products
+- Check active quarter: `App\Models\Quarter::getActiveQuarter()`
+
+**2. Source Types**
+
+| Source | Field Required | Value Type | API Endpoint |
+|--------|---------------|------------|--------------|
+| **INSTRUMENT** | `source_instrument_id` | Integer (ID) | `/api/v1/measurement-instruments` |
+| **TOOL** | `source_tool_model` | String (Model) | `/api/v1/tools/models` |
+| **MANUAL** | - | - | - |
+| **DERIVED** | `source_derived_name_id` | String (name_id) | - |
+
+**3. Nature-based Validation**
+
+| Nature | `source` Required? | `type` Required? | `rule_evaluation_setting` Required? |
+|--------|-------------------|------------------|-------------------------------------|
+| **QUANTITATIVE** | ✅ Yes | ✅ Yes | ✅ Yes |
+| **QUALITATIVE** | ❌ No (optional) | ❌ No (optional) | ❌ No (must be null) |
+
+---
+
 ## 🔄 Changelog
 
-### Version 1.0.0 (Current)
+### Version 1.1.0 (Current - Nov 2024)
+- ✅ Fixed: QUALITATIVE validation (source & type now optional)
+- ✅ Added: Quarter activation command (`php artisan quarter:activate`)
+- ✅ Fixed: measurement_groups null handling
+- ✅ Fixed: Laravel ServeCommand Windows bug
+- ✅ Enhanced: Comprehensive seeder system
+- ✅ Improved: API documentation and troubleshooting
+
+### Version 1.0.0
 - ✅ Product & measurement management
 - ✅ Advanced formula system with 40+ functions
 - ✅ Tools & instruments tracking
