@@ -24,6 +24,8 @@ return new class extends Migration
             $table->string('article_code')->nullable();
             $table->string('no_document')->nullable();
             $table->string('no_doc_reference')->nullable();
+            $table->string('color')->nullable();
+            $table->string('size')->nullable();
             
             // Measurement Points - JSON untuk menyimpan complex structure
             $table->json('measurement_points'); // Array of measurement point configurations

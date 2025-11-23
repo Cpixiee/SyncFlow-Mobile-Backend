@@ -21,6 +21,8 @@ class Product extends Model
         'article_code',
         'no_document',
         'no_doc_reference',
+        'color',
+        'size',
         'measurement_points',
         'measurement_groups'
     ];
@@ -217,7 +219,7 @@ class Product extends Model
                     ->where('product_name', $basicInfo['product_name']);
 
         // Check optional fields
-        $optionalFields = ['ref_spec_number', 'nom_size_vo', 'article_code', 'no_document', 'no_doc_reference'];
+        $optionalFields = ['ref_spec_number', 'nom_size_vo', 'article_code', 'no_document', 'no_doc_reference', 'color', 'size'];
         
         foreach ($optionalFields as $field) {
             if (isset($basicInfo[$field]) && !empty($basicInfo[$field])) {

@@ -31,6 +31,8 @@ class ProductController extends Controller
                 'basic_info.article_code' => 'nullable|string',
                 'basic_info.no_document' => 'nullable|string',
                 'basic_info.no_doc_reference' => 'nullable|string',
+                'basic_info.color' => 'nullable|string',
+                'basic_info.size' => 'nullable|string',
                 
                 // Measurement Points
                 'measurement_points' => 'required|array|min:1',
@@ -148,6 +150,8 @@ class ProductController extends Controller
                 'article_code' => $basicInfo['article_code'] ?? null,
                 'no_document' => $basicInfo['no_document'] ?? null,
                 'no_doc_reference' => $basicInfo['no_doc_reference'] ?? null,
+                'color' => $basicInfo['color'] ?? null,
+                'size' => $basicInfo['size'] ?? null,
                 'measurement_points' => $processedMeasurementPoints,
                 'measurement_groups' => $measurementGroups,
             ]);
@@ -164,6 +168,8 @@ class ProductController extends Controller
                     'article_code' => $product->article_code,
                     'no_document' => $product->no_document,
                     'no_doc_reference' => $product->no_doc_reference,
+                    'color' => $product->color,
+                    'size' => $product->size,
                 ],
                 'measurement_points' => $product->measurement_points,
                 'measurement_groups' => $product->measurement_groups,
@@ -202,6 +208,8 @@ class ProductController extends Controller
                     'article_code' => $product->article_code,
                     'no_document' => $product->no_document,
                     'no_doc_reference' => $product->no_doc_reference,
+                    'color' => $product->color,
+                    'size' => $product->size,
                 ],
                 'measurement_points' => $product->measurement_points,
             ]);
@@ -296,6 +304,8 @@ class ProductController extends Controller
                     'article_code' => $product->article_code,
                     'no_document' => $product->no_document,
                     'no_doc_reference' => $product->no_doc_reference,
+                    'color' => $product->color,
+                    'size' => $product->size,
                 ];
             })->values()->all();
 
@@ -329,6 +339,8 @@ class ProductController extends Controller
                 'article_code' => 'nullable|string|max:255',
                 'no_document' => 'nullable|string|max:255',
                 'no_doc_reference' => 'nullable|string|max:255',
+                'color' => 'nullable|string|max:255',
+                'size' => 'nullable|string|max:255',
             ]);
 
             if ($validator->fails()) {
