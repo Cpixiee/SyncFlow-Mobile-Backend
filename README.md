@@ -679,16 +679,6 @@ The server still works normally. Ignore the error or use Laragon/XAMPP instead.
 
 ---
 
-## 🤝 Contributing
-
-Contributions are welcome! Please follow these guidelines:
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
 ### Coding Standards
 
 - Follow PSR-12 coding standard
@@ -698,15 +688,13 @@ Contributions are welcome! Please follow these guidelines:
 
 ---
 
-## 📝 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
----
-
 ## 👥 Authors
 
 - **Development Team** - Initial work
+- Aditya
+- wiwit
+- rahmat
+- andar 
 
 ---
 
@@ -753,23 +741,7 @@ For support, email support@syncflow.com or open an issue in the GitHub repositor
 
 ## 🔄 Changelog
 
-### Version 1.1.0 (Current - Nov 2024)
-- ✅ Fixed: QUALITATIVE validation (source & type now optional)
-- ✅ Added: Quarter activation command (`php artisan quarter:activate`)
-- ✅ Fixed: measurement_groups null handling
-- ✅ Fixed: Laravel ServeCommand Windows bug
-- ✅ Enhanced: Comprehensive seeder system
-- ✅ Improved: API documentation and troubleshooting
-
-### Version 1.0.0
-- ✅ Product & measurement management
-- ✅ Advanced formula system with 40+ functions
-- ✅ Tools & instruments tracking
-- ✅ Issue tracking system
-- ✅ JWT authentication
-- ✅ Role-based access control
-
 ---
 
-**Made with ❤️ using Laravel**
+
 
