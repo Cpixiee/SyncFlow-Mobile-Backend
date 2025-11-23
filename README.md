@@ -93,8 +93,9 @@ php artisan key:generate
 php artisan jwt:secret
 ```
 
-6. **Configure database in `.env`**
+6. **Configure database and timezone in `.env`**
 ```env
+# Database
 DB_CONNECTION=mysql
 DB_HOST=127.0.0.1
 DB_PORT=3306
@@ -381,10 +382,6 @@ php artisan db:seed --class=ToolSeeder
 php artisan db:seed --class=SuperAdminSeeder
 php artisan db:seed --class=LoginUserSeeder
 ```
-
-> ✅ **All seeders are idempotent** - Aman dijalankan berulang kali tanpa error!
-> - Seeders menggunakan `updateOrCreate()` untuk update data yang sudah ada
-> - Cocok untuk deployment yang berulang-ulang via `deploy.sh`
 
 ### Fresh Install
 ```bash

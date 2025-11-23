@@ -31,6 +31,7 @@
 | No active quarter error | ✅ FIXED | Auto-activated in deployment |
 | `measurement_groups` null error | ✅ FIXED | Now handles null properly |
 | Raw data access from other items | ✅ CONFIRMED | Already supported |
+| Timezone mismatch (UTC vs WIB) | ✅ FIXED | All timestamps now in Asia/Jakarta (WIB/UTC+7) |
 
 ### 🆕 New Features
 
