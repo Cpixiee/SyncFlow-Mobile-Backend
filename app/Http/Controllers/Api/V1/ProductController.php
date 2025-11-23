@@ -31,7 +31,7 @@ class ProductController extends Controller
                 'basic_info.article_code' => 'nullable|string',
                 'basic_info.no_document' => 'nullable|string',
                 'basic_info.no_doc_reference' => 'nullable|string',
-                'basic_info.color' => 'nullable|string',
+                'basic_info.color' => 'nullable|string|regex:/^#?[0-9A-Fa-f]{6}$/',
                 'basic_info.size' => 'nullable|string',
                 
                 // Measurement Points
@@ -51,14 +51,14 @@ class ProductController extends Controller
                 // Variables
                 'measurement_points.*.variables' => 'nullable|array',
                 'measurement_points.*.variables.*.type' => 'required_with:measurement_points.*.variables|in:FIXED,MANUAL,FORMULA',
-                'measurement_points.*.variables.*.name' => 'required_with:measurement_points.*.variables|string|regex:/^[a-zA-Z_]+$/',
+                'measurement_points.*.variables.*.name' => 'required_with:measurement_points.*.variables|string|regex:/^[a-zA-Z_][a-zA-Z0-9_]*$/',
                 'measurement_points.*.variables.*.value' => 'required_if:measurement_points.*.variables.*.type,FIXED|nullable|numeric',
                 'measurement_points.*.variables.*.formula' => 'required_if:measurement_points.*.variables.*.type,FORMULA|nullable|string',
                 'measurement_points.*.variables.*.is_show' => 'required_with:measurement_points.*.variables|boolean',
                 
                 // Pre-processing formulas
                 'measurement_points.*.pre_processing_formulas' => 'nullable|array',
-                'measurement_points.*.pre_processing_formulas.*.name' => 'required_with:measurement_points.*.pre_processing_formulas|string|regex:/^[a-zA-Z_]+$/',
+                'measurement_points.*.pre_processing_formulas.*.name' => 'required_with:measurement_points.*.pre_processing_formulas|string|regex:/^[a-zA-Z_][a-zA-Z0-9_]*$/',
                 'measurement_points.*.pre_processing_formulas.*.formula' => 'required_with:measurement_points.*.pre_processing_formulas|string',
                 'measurement_points.*.pre_processing_formulas.*.is_show' => 'required_with:measurement_points.*.pre_processing_formulas|boolean',
                 
@@ -126,6 +126,12 @@ class ProductController extends Controller
             $quantitativeErrors = $this->validateQuantitativeRequirements($measurementPoints);
             if (!empty($quantitativeErrors)) {
                 return $this->errorResponse('QUANTITATIVE measurement validation failed', 'QUANTITATIVE_VALIDATION_ERROR', 400, $quantitativeErrors);
+            }
+
+            // Validate type-specific rules (BEFORE_AFTER wajib pre-processing, evaluation rules, etc)
+            $typeSpecificErrors = $this->validateTypeSpecificRules($measurementPoints);
+            if (!empty($typeSpecificErrors)) {
+                return $this->errorResponse('Type-specific validation failed', 'TYPE_VALIDATION_ERROR', 400, $typeSpecificErrors);
             }
 
             // Validate name uniqueness across variables, pre_processing_formulas, and joint_setting formulas
@@ -339,7 +345,7 @@ class ProductController extends Controller
                 'article_code' => 'nullable|string|max:255',
                 'no_document' => 'nullable|string|max:255',
                 'no_doc_reference' => 'nullable|string|max:255',
-                'color' => 'nullable|string|max:255',
+                'color' => 'nullable|string|regex:/^#?[0-9A-Fa-f]{6}$/',
                 'size' => 'nullable|string|max:255',
             ]);
 
@@ -555,10 +561,18 @@ class ProductController extends Controller
             if (isset($point['variables']) && is_array($point['variables'])) {
                 foreach ($point['variables'] as $varIndex => &$variable) {
                     if ($variable['type'] === 'FORMULA' && isset($variable['formula'])) {
+                        // Get current measurement point context for variables
+                        $currentPointContext = [
+                            'type' => $point['setup']['type'] ?? null,
+                            'variables' => array_slice($point['variables'], 0, $varIndex), // Previous variables only
+                            'pre_processing_formulas' => [] // Variables can't reference pre-processing formulas
+                        ];
+                        
                         $formulaErrors = $this->validateSingleFormula(
                             $variable['formula'],
                             $availableIds,
-                            "{$pointPrefix}.variable_{$varIndex}"
+                            "{$pointPrefix}.variable_{$varIndex}",
+                            $currentPointContext
                         );
                         
                         if (!empty($formulaErrors)) {
@@ -583,10 +597,18 @@ class ProductController extends Controller
                         // and other measurement items defined before
                         $preProcessingAvailableIds = array_merge($availableIds, [$point['setup']['name_id']]);
                         
+                        // Get current measurement point context (type, variables, previous formulas)
+                        $currentPointContext = [
+                            'type' => $point['setup']['type'] ?? null,
+                            'variables' => $point['variables'] ?? [],
+                            'pre_processing_formulas' => array_slice($point['pre_processing_formulas'], 0, $formulaIndex) // Previous formulas only
+                        ];
+                        
                         $formulaErrors = $this->validateSingleFormula(
                             $formula['formula'],
                             $preProcessingAvailableIds,
-                            "{$pointPrefix}.pre_processing_formula_{$formulaIndex}"
+                            "{$pointPrefix}.pre_processing_formula_{$formulaIndex}",
+                            $currentPointContext
                         );
                         
                         if (!empty($formulaErrors)) {
@@ -610,10 +632,20 @@ class ProductController extends Controller
                         // For joint formulas, can reference current measurement item's pre-processing results
                         $jointAvailableIds = array_merge($availableIds, [$point['setup']['name_id']]);
                         
+                        // Get current measurement point context for joint formulas
+                        // Joint formulas can reference all pre-processing formulas, variables, and previous joint formulas
+                        $currentPointContext = [
+                            'type' => $point['setup']['type'] ?? null,
+                            'variables' => $point['variables'] ?? [],
+                            'pre_processing_formulas' => $point['pre_processing_formulas'] ?? [],
+                            'joint_formulas' => array_slice($point['evaluation_setting']['joint_setting']['formulas'], 0, $formulaIndex) // Previous joint formulas only
+                        ];
+                        
                         $formulaErrors = $this->validateSingleFormula(
                             $formula['formula'],
                             $jointAvailableIds,
-                            "{$pointPrefix}.joint_formula_{$formulaIndex}"
+                            "{$pointPrefix}.joint_formula_{$formulaIndex}",
+                            $currentPointContext
                         );
                         
                         if (!empty($formulaErrors)) {
@@ -636,8 +668,14 @@ class ProductController extends Controller
 
     /**
      * Validate a single formula
+     * 
+     * @param string $formula The formula to validate
+     * @param array $availableIds Available measurement item name_ids
+     * @param string $errorPrefix Error message prefix
+     * @param array|null $currentPointContext Context of current measurement point (type, variables, pre_processing_formulas)
+     * @return array Validation errors
      */
-    private function validateSingleFormula(string $formula, array $availableIds, string $errorPrefix): array
+    private function validateSingleFormula(string $formula, array $availableIds, string $errorPrefix, ?array $currentPointContext = null): array
     {
         $errors = [];
         
@@ -649,8 +687,65 @@ class ProductController extends Controller
             return $errors;
         }
         
-        // Validate dependencies
-        $missingDependencies = FormulaHelper::validateFormulaDependencies($formula, $availableIds);
+        // Get all referenced identifiers from formula
+        $referencedItems = FormulaHelper::extractMeasurementReferences($formula);
+        
+        // Build list of valid local identifiers (raw data variables, variables, previous formulas)
+        $validLocalIdentifiers = [];
+        
+        if ($currentPointContext) {
+            $type = $currentPointContext['type'] ?? null;
+            
+            // Add raw data variables based on type
+            if ($type === 'SINGLE') {
+                $validLocalIdentifiers[] = 'single_value';
+            } elseif ($type === 'BEFORE_AFTER') {
+                $validLocalIdentifiers[] = 'before';
+                $validLocalIdentifiers[] = 'after';
+            }
+            
+            // Add variables from current measurement point
+            if (isset($currentPointContext['variables']) && is_array($currentPointContext['variables'])) {
+                foreach ($currentPointContext['variables'] as $variable) {
+                    if (isset($variable['name'])) {
+                        $validLocalIdentifiers[] = $variable['name'];
+                    }
+                }
+            }
+            
+            // Add previous pre-processing formula names
+            if (isset($currentPointContext['pre_processing_formulas']) && is_array($currentPointContext['pre_processing_formulas'])) {
+                foreach ($currentPointContext['pre_processing_formulas'] as $prevFormula) {
+                    if (isset($prevFormula['name'])) {
+                        $validLocalIdentifiers[] = $prevFormula['name'];
+                    }
+                }
+            }
+            
+            // Add previous joint formula names
+            if (isset($currentPointContext['joint_formulas']) && is_array($currentPointContext['joint_formulas'])) {
+                foreach ($currentPointContext['joint_formulas'] as $prevJointFormula) {
+                    if (isset($prevJointFormula['name'])) {
+                        $validLocalIdentifiers[] = $prevJointFormula['name'];
+                    }
+                }
+            }
+        }
+        
+        // Filter out valid local identifiers and check remaining against available measurement items
+        $missingDependencies = [];
+        foreach ($referencedItems as $itemId) {
+            // Skip if it's a valid local identifier
+            if (in_array($itemId, $validLocalIdentifiers)) {
+                continue;
+            }
+            
+            // Check if it's an available measurement item
+            if (!in_array($itemId, $availableIds)) {
+                $missingDependencies[] = $itemId;
+            }
+        }
+        
         if (!empty($missingDependencies)) {
             $errors[$errorPrefix] = "Formula references measurement items yang belum dibuat: " . 
                 implode(', ', $missingDependencies) . 
@@ -747,10 +842,10 @@ class ProductController extends Controller
                 $errors["measurement_point_{$pointIndex}"] = 'Duplicate names found: ' . implode(', ', array_unique($duplicates));
             }
             
-            // Validate name format (only alphabet and underscore)
+            // Validate name format (alphanumeric + underscore, must start with letter or underscore)
             foreach ($allNames as $name) {
-                if (!preg_match('/^[a-zA-Z_]+$/', $name)) {
-                    $errors["measurement_point_{$pointIndex}"] = "Invalid name format: {$name}. Only alphabet and underscore allowed.";
+                if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $name)) {
+                    $errors["measurement_point_{$pointIndex}"] = "Invalid name format: {$name}. Name must start with letter or underscore, followed by letters, numbers, or underscores.";
                 }
             }
         }
@@ -874,6 +969,67 @@ class ProductController extends Controller
                     // QUANTITATIVE must have rule_evaluation_setting
                     if (!$ruleEvaluation) {
                         $errors["measurement_point_{$pointIndex}"] = 'rule_evaluation_setting is required for QUANTITATIVE nature';
+                    }
+                }
+            }
+        }
+        
+        return $errors;
+    }
+
+    /**
+     * Validate type-specific rules
+     * - BEFORE_AFTER wajib ada pre_processing_formulas
+     * - BEFORE_AFTER tidak bisa is_raw_data = true
+     * - Jika tidak ada pre_processing_formulas, tidak bisa pilih formula di evaluation
+     * - pre_processing_formula_name harus ada di pre_processing_formulas
+     */
+    private function validateTypeSpecificRules(array $measurementPoints): array
+    {
+        $errors = [];
+        
+        foreach ($measurementPoints as $pointIndex => $point) {
+            $setup = $point['setup'] ?? [];
+            $type = $setup['type'] ?? null;
+            $preProcessingFormulas = $point['pre_processing_formulas'] ?? [];
+            $evaluationType = $point['evaluation_type'] ?? '';
+            $evaluationSetting = $point['evaluation_setting'] ?? [];
+            
+            // Rule 1: BEFORE_AFTER wajib ada pre_processing_formulas
+            if ($type === 'BEFORE_AFTER') {
+                if (empty($preProcessingFormulas) || !is_array($preProcessingFormulas)) {
+                    $errors["measurement_points.{$pointIndex}.pre_processing_formulas"] = 
+                        'Pre-processing formulas wajib diisi untuk type BEFORE_AFTER';
+                }
+            }
+            
+            // Rule 2 & 3: Validasi evaluation_setting untuk PER_SAMPLE
+            if ($evaluationType === 'PER_SAMPLE') {
+                $perSampleSetting = $evaluationSetting['per_sample_setting'] ?? null;
+                
+                if ($perSampleSetting) {
+                    $isRawData = $perSampleSetting['is_raw_data'] ?? false;
+                    $formulaName = $perSampleSetting['pre_processing_formula_name'] ?? null;
+                    
+                    // Rule 2: BEFORE_AFTER tidak bisa is_raw_data = true
+                    if ($type === 'BEFORE_AFTER' && $isRawData === true) {
+                        $errors["measurement_points.{$pointIndex}.evaluation_setting.per_sample_setting.is_raw_data"] = 
+                            'Type BEFORE_AFTER tidak bisa menggunakan raw data untuk evaluation, harus menggunakan pre-processing formula';
+                    }
+                    
+                    // Rule 3: Jika tidak ada pre_processing_formulas, tidak bisa pilih formula
+                    if (empty($preProcessingFormulas) && !$isRawData && !empty($formulaName)) {
+                        $errors["measurement_points.{$pointIndex}.evaluation_setting.per_sample_setting.pre_processing_formula_name"] = 
+                            'Tidak bisa menggunakan pre-processing formula karena tidak ada pre-processing formulas yang didefinisikan. Gunakan is_raw_data = true atau tambahkan pre-processing formulas';
+                    }
+                    
+                    // Rule 4: pre_processing_formula_name harus ada di pre_processing_formulas
+                    if (!$isRawData && !empty($formulaName) && !empty($preProcessingFormulas)) {
+                        $formulaNames = array_column($preProcessingFormulas, 'name');
+                        if (!in_array($formulaName, $formulaNames)) {
+                            $errors["measurement_points.{$pointIndex}.evaluation_setting.per_sample_setting.pre_processing_formula_name"] = 
+                                "Pre-processing formula '{$formulaName}' tidak ditemukan dalam pre_processing_formulas. Formula yang tersedia: " . implode(', ', $formulaNames);
+                        }
                     }
                 }
             }

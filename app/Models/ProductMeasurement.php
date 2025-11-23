@@ -167,6 +167,13 @@ class ProductMeasurement extends Model
         $processedSamples = [];
         $manualVariables = $measurementItem['variable_values'] ?? [];
         $setup = $measurementPoint['setup'];
+        $type = $setup['type'] ?? null;
+        $preProcessingFormulas = $measurementPoint['pre_processing_formulas'] ?? [];
+
+        // Runtime validation: BEFORE_AFTER wajib ada pre_processing_formulas
+        if ($type === 'BEFORE_AFTER' && (empty($preProcessingFormulas) || !is_array($preProcessingFormulas))) {
+            throw new \Exception('Type BEFORE_AFTER wajib memiliki pre-processing formulas');
+        }
 
         // Process FORMULA variables dari measurement point configuration dengan akses ke current batch
         $configVariables = $measurementPoint['variables'] ?? [];
@@ -202,6 +209,7 @@ class ProductMeasurement extends Model
             }
 
             // Process pre-processing formulas jika ada
+            // Untuk BEFORE_AFTER, pre_processing_formulas wajib ada (sudah divalidasi di atas)
             if (isset($measurementPoint['pre_processing_formulas']) && !empty($measurementPoint['pre_processing_formulas'])) {
                 $processedSample['processed_values'] = $this->processPreProcessingFormulas(
                     $measurementPoint['pre_processing_formulas'],
@@ -269,6 +277,13 @@ class ProductMeasurement extends Model
     {
         $ruleEvaluation = $measurementPoint['rule_evaluation_setting'];
         $evaluationSetting = $measurementPoint['evaluation_setting']['per_sample_setting'];
+        $setup = $measurementPoint['setup'];
+        $type = $setup['type'] ?? null;
+        
+        // Runtime validation: BEFORE_AFTER tidak bisa is_raw_data = true
+        if ($type === 'BEFORE_AFTER' && isset($evaluationSetting['is_raw_data']) && $evaluationSetting['is_raw_data'] === true) {
+            throw new \Exception('Type BEFORE_AFTER tidak bisa menggunakan raw data untuk evaluation, harus menggunakan pre-processing formula');
+        }
         
         $allSamplesOK = true;
         
@@ -283,9 +298,17 @@ class ProductMeasurement extends Model
                 }
             } else {
                 // Use pre-processing formula result
-                $formulaName = $evaluationSetting['pre_processing_formula_name'];
+                $formulaName = $evaluationSetting['pre_processing_formula_name'] ?? null;
+                if (empty($formulaName)) {
+                    throw new \Exception('pre_processing_formula_name wajib diisi jika is_raw_data = false');
+                }
+                
                 if (isset($sample['processed_values'][$formulaName])) {
                     $valueToEvaluate = $sample['processed_values'][$formulaName];
+                } else {
+                    // Formula result tidak ditemukan
+                    $availableFormulas = array_keys($sample['processed_values'] ?? []);
+                    throw new \Exception("Pre-processing formula '{$formulaName}' tidak ditemukan dalam processed_values. Formula yang tersedia: " . implode(', ', $availableFormulas));
                 }
             }
 
