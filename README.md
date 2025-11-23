@@ -336,9 +336,22 @@ The formula system uses **NXP MathExecutor** library:
 
 ## 📖 Detailed Documentation
 
+### For Developers
+- **[API Changes & Integration Guide](API_CHANGES_AND_INTEGRATION_GUIDE.md)** - 🆕 Complete guide for frontend/mobile integration
 - **[Formula System Documentation](FORMULA_SYSTEM_DOCUMENTATION.md)** - Complete formula guide with examples
 - **[Tools Logic Explanation](TOOLS_LOGIC_EXPLANATION.md)** - Tools & instruments management
 - **[Issue API Documentation](ISSUE_API_DOCUMENTATION.md)** - Issue tracking system
+
+### Key Documentation for Frontend/Mobile Teams
+👉 **[Start here: API Changes & Integration Guide](API_CHANGES_AND_INTEGRATION_GUIDE.md)**
+
+This guide includes:
+- ✅ All recent changes and fixes
+- ✅ Complete payload examples
+- ✅ Response examples
+- ✅ Common errors & solutions
+- ✅ Raw data access explanation
+- ✅ Formula cross-reference guide
 
 ## ⚙️ Important Commands
 
@@ -368,6 +381,10 @@ php artisan db:seed --class=ToolSeeder
 php artisan db:seed --class=SuperAdminSeeder
 php artisan db:seed --class=LoginUserSeeder
 ```
+
+> ✅ **All seeders are idempotent** - Aman dijalankan berulang kali tanpa error!
+> - Seeders menggunakan `updateOrCreate()` untuk update data yang sudah ada
+> - Cocok untuk deployment yang berulang-ulang via `deploy.sh`
 
 ### Fresh Install
 ```bash

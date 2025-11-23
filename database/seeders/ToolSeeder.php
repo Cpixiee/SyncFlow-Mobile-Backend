@@ -110,7 +110,10 @@ class ToolSeeder extends Seeder
         ];
 
         foreach ($tools as $toolData) {
-            Tool::create($toolData);
+            Tool::updateOrCreate(
+                ['imei' => $toolData['imei']], // Match by IMEI (unique key)
+                $toolData                       // Update or insert these values
+            );
         }
 
         $this->command->info('Successfully seeded ' . count($tools) . ' tools!');
