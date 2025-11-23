@@ -155,14 +155,67 @@ The application will be available at `http://localhost:8000`
 
 ## 📖 Formula System Usage
 
+### Understanding Pre-Processing Aggregation Functions
+
+**How Aggregation Works:**
+
+When you reference another measurement item in a formula, you can use aggregation functions to process the sample data:
+
+**Example Data:**
+- `thickness_a` has 3 samples: [30, 40, 10]
+
+**Different Ways to Reference:**
+
+1. **Direct Reference (Not Common)**
+   ```javascript
+   =thickness_a
+   ```
+   - Accesses the variable directly (used for DERIVED sources or variables)
+   - Does NOT automatically aggregate samples
+
+2. **Using Aggregation Functions (Recommended)**
+   
+   | Formula | Description | Calculation | Result |
+   |---------|-------------|-------------|--------|
+   | `=avg(thickness_a)` | Average (mean) | (30+40+10) / 3 | **26.67** |
+   | `=sum(thickness_a)` | Total sum | 30+40+10 | **80** |
+   | `=min(thickness_a)` | Minimum value | min(30,40,10) | **10** |
+   | `=max(thickness_a)` | Maximum value | max(30,40,10) | **40** |
+   | `=count(thickness_a)` | Count samples | count of values | **3** |
+
+**Real-World Example:**
+
+```javascript
+// Scenario: room_temp references thickness_a, thickness_b, thickness_c
+// thickness_a samples: [30, 40, 10] → avg = 26.67
+// thickness_b samples: [25, 35, 15] → avg = 25
+// thickness_c samples: [28, 38, 12] → avg = 26
+
+// Calculate average of all three measurement items:
+=(avg(thickness_a) + avg(thickness_b) + avg(thickness_c)) / 3
+// Result: (26.67 + 25 + 26) / 3 = 25.89
+```
+
+**Important Notes:**
+- ✅ Aggregation functions process **all raw sample values** from the referenced measurement item
+- ✅ Works exactly like Excel/spreadsheet functions
+- ✅ Functions follow standard mathematical definitions
+- ✅ Can combine multiple aggregation functions in one formula
+
 ### Basic Formula Examples
 
 ```javascript
 // Simple average
 =avg(thickness_a)
 
-// Multiple measurements
+// Multiple measurements with aggregation
 =(avg(thickness_a) + avg(thickness_b) + avg(thickness_c)) / 3
+
+// Using different aggregation functions
+=max(thickness_a) - min(thickness_a)
+
+// Count and sum
+=sum(thickness_a) / count(thickness_a)
 
 // Temperature conversion (Fahrenheit to Celsius)
 =(temperature - 32) * 5 / 9
@@ -170,11 +223,14 @@ The application will be available at `http://localhost:8000`
 // Trigonometric calculation
 =sin(angle) * radius
 
-// Complex formula
+// Complex formula with math functions
 =sqrt(pow(x, 2) + pow(y, 2))
 
 // Conditional logic
 =if(avg(thickness_a) > 1.5, 1, 0)
+
+// Statistical analysis
+=if(max(thickness_a) - min(thickness_a) > 5, avg(thickness_a), 0)
 ```
 
 ### Formula Rules
@@ -183,6 +239,8 @@ The application will be available at `http://localhost:8000`
 2. ✅ **Case-insensitive** function names (AVG = avg = Avg)
 3. ✅ **Referenced measurement items must exist** before formula
 4. ✅ **Order matters** - dependencies must be defined first
+5. ✅ **Use aggregation functions** (avg, sum, min, max, count) to reference other measurement items
+6. ✅ **Follows PEMDAS/BODMAS** order of operations
 
 ### Create Product with Formula
 
@@ -190,7 +248,62 @@ The application will be available at `http://localhost:8000`
 POST /api/v1/products
 Authorization: Bearer {token}
 
-# See FORMULA_SYSTEM_DOCUMENTATION.md for complete JSON examples
+# Example payload with aggregation formula:
+{
+  "basic_info": {
+    "product_category_id": 1,
+    "product_name": "VO"
+  },
+  "measurement_points": [
+    {
+      "setup": {
+        "name": "Thickness A",
+        "name_id": "thickness_a",
+        "sample_amount": 5,
+        "source": "MANUAL",
+        "type": "SINGLE",
+        "nature": "QUANTITATIVE"
+      },
+      "evaluation_type": "PER_SAMPLE",
+      "evaluation_setting": {
+        "per_sample_setting": {
+          "is_raw_data": true
+        }
+      },
+      "rule_evaluation_setting": {
+        "rule": "MIN",
+        "unit": "mm",
+        "value": 0
+      }
+    },
+    {
+      "setup": {
+        "name": "Room Temp",
+        "name_id": "room_temp",
+        "sample_amount": 1,
+        "source": "DERIVED",
+        "source_derived_name_id": "thickness_a",
+        "type": "SINGLE",
+        "nature": "QUANTITATIVE"
+      },
+      "variables": [
+        {
+          "type": "FORMULA",
+          "name": "calculated_value",
+          "formula": "=avg(thickness_a)",
+          "is_show": true
+        }
+      ],
+      "evaluation_type": "SKIP_CHECK",
+      "evaluation_setting": {"_skip": true},
+      "rule_evaluation_setting": {
+        "rule": "MIN",
+        "unit": "mm",
+        "value": 0
+      }
+    }
+  ]
+}
 ```
 
 ### Formula Autocomplete API
@@ -199,8 +312,6 @@ Authorization: Bearer {token}
 GET /api/v1/products/{productId}/measurement-items/suggest?query=thick
 Authorization: Bearer {token}
 ```
-
-> 📖 **Complete API examples with request/response:** See [FORMULA_SYSTEM_DOCUMENTATION.md](FORMULA_SYSTEM_DOCUMENTATION.md)
 
 ---
 

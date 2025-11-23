@@ -783,4 +783,237 @@ class FormulaValidationTest extends TestCase
         // Verify function names were normalized to lowercase
         $this->assertStringNotContainsString('AVG', $formula);
     }
+
+    /**
+     * Test 10: Test all aggregation functions (avg, sum, min, max, count)
+     */
+    public function test_all_aggregation_functions_should_work()
+    {
+        $productData = [
+            'basic_info' => [
+                'product_category_id' => $this->productCategory->id,
+                'product_name' => 'VO'
+            ],
+            'measurement_points' => [
+                // Base measurement item
+                [
+                    'setup' => [
+                        'name' => 'Thickness A',
+                        'name_id' => 'thickness_a',
+                        'sample_amount' => 5,
+                        'source' => 'MANUAL',
+                        'type' => 'SINGLE',
+                        'nature' => 'QUANTITATIVE'
+                    ],
+                    'evaluation_type' => 'PER_SAMPLE',
+                    'evaluation_setting' => [
+                        'per_sample_setting' => [
+                            'is_raw_data' => true
+                        ]
+                    ],
+                    'rule_evaluation_setting' => [
+                        'rule' => 'MIN',
+                        'unit' => 'mm',
+                        'value' => 0
+                    ]
+                ],
+                // Test AVG function
+                [
+                    'setup' => [
+                        'name' => 'Average Test',
+                        'name_id' => 'average_test',
+                        'sample_amount' => 1,
+                        'source' => 'DERIVED',
+                        'source_derived_name_id' => 'thickness_a',
+                        'type' => 'SINGLE',
+                        'nature' => 'QUANTITATIVE'
+                    ],
+                    'variables' => [
+                        [
+                            'type' => 'FORMULA',
+                            'name' => 'avg_value',
+                            'formula' => '=avg(thickness_a)',
+                            'is_show' => true
+                        ]
+                    ],
+                    'evaluation_type' => 'SKIP_CHECK',
+                    'evaluation_setting' => ['_skip' => true],
+                    'rule_evaluation_setting' => [
+                        'rule' => 'MIN',
+                        'unit' => 'mm',
+                        'value' => 0
+                    ]
+                ],
+                // Test SUM function
+                [
+                    'setup' => [
+                        'name' => 'Sum Test',
+                        'name_id' => 'sum_test',
+                        'sample_amount' => 1,
+                        'source' => 'DERIVED',
+                        'source_derived_name_id' => 'thickness_a',
+                        'type' => 'SINGLE',
+                        'nature' => 'QUANTITATIVE'
+                    ],
+                    'variables' => [
+                        [
+                            'type' => 'FORMULA',
+                            'name' => 'sum_value',
+                            'formula' => '=sum(thickness_a)',
+                            'is_show' => true
+                        ]
+                    ],
+                    'evaluation_type' => 'SKIP_CHECK',
+                    'evaluation_setting' => ['_skip' => true],
+                    'rule_evaluation_setting' => [
+                        'rule' => 'MIN',
+                        'unit' => 'mm',
+                        'value' => 0
+                    ]
+                ],
+                // Test MIN function
+                [
+                    'setup' => [
+                        'name' => 'Min Test',
+                        'name_id' => 'min_test',
+                        'sample_amount' => 1,
+                        'source' => 'DERIVED',
+                        'source_derived_name_id' => 'thickness_a',
+                        'type' => 'SINGLE',
+                        'nature' => 'QUANTITATIVE'
+                    ],
+                    'variables' => [
+                        [
+                            'type' => 'FORMULA',
+                            'name' => 'min_value',
+                            'formula' => '=min(thickness_a)',
+                            'is_show' => true
+                        ]
+                    ],
+                    'evaluation_type' => 'SKIP_CHECK',
+                    'evaluation_setting' => ['_skip' => true],
+                    'rule_evaluation_setting' => [
+                        'rule' => 'MIN',
+                        'unit' => 'mm',
+                        'value' => 0
+                    ]
+                ],
+                // Test MAX function
+                [
+                    'setup' => [
+                        'name' => 'Max Test',
+                        'name_id' => 'max_test',
+                        'sample_amount' => 1,
+                        'source' => 'DERIVED',
+                        'source_derived_name_id' => 'thickness_a',
+                        'type' => 'SINGLE',
+                        'nature' => 'QUANTITATIVE'
+                    ],
+                    'variables' => [
+                        [
+                            'type' => 'FORMULA',
+                            'name' => 'max_value',
+                            'formula' => '=max(thickness_a)',
+                            'is_show' => true
+                        ]
+                    ],
+                    'evaluation_type' => 'SKIP_CHECK',
+                    'evaluation_setting' => ['_skip' => true],
+                    'rule_evaluation_setting' => [
+                        'rule' => 'MIN',
+                        'unit' => 'mm',
+                        'value' => 0
+                    ]
+                ],
+                // Test COUNT function
+                [
+                    'setup' => [
+                        'name' => 'Count Test',
+                        'name_id' => 'count_test',
+                        'sample_amount' => 1,
+                        'source' => 'DERIVED',
+                        'source_derived_name_id' => 'thickness_a',
+                        'type' => 'SINGLE',
+                        'nature' => 'QUANTITATIVE'
+                    ],
+                    'variables' => [
+                        [
+                            'type' => 'FORMULA',
+                            'name' => 'count_value',
+                            'formula' => '=count(thickness_a)',
+                            'is_show' => true
+                        ]
+                    ],
+                    'evaluation_type' => 'SKIP_CHECK',
+                    'evaluation_setting' => ['_skip' => true],
+                    'rule_evaluation_setting' => [
+                        'rule' => 'MIN',
+                        'unit' => 'mm',
+                        'value' => 0
+                    ]
+                ],
+                // Test complex formula with multiple aggregation functions
+                [
+                    'setup' => [
+                        'name' => 'Range Test',
+                        'name_id' => 'range_test',
+                        'sample_amount' => 1,
+                        'source' => 'DERIVED',
+                        'source_derived_name_id' => 'thickness_a',
+                        'type' => 'SINGLE',
+                        'nature' => 'QUANTITATIVE'
+                    ],
+                    'variables' => [
+                        [
+                            'type' => 'FORMULA',
+                            'name' => 'range_value',
+                            'formula' => '=max(thickness_a) - min(thickness_a)',
+                            'is_show' => true
+                        ]
+                    ],
+                    'evaluation_type' => 'SKIP_CHECK',
+                    'evaluation_setting' => ['_skip' => true],
+                    'rule_evaluation_setting' => [
+                        'rule' => 'MIN',
+                        'unit' => 'mm',
+                        'value' => 0
+                    ]
+                ]
+            ]
+        ];
+
+        $response = $this->withHeaders([
+            'Authorization' => 'Bearer ' . $this->adminToken
+        ])->postJson('/api/v1/products', $productData);
+
+        $response->assertStatus(201);
+
+        // Verify all formulas were processed correctly
+        $product = Product::first();
+        
+        // Check AVG formula
+        $avgFormula = $product->measurement_points[1]['variables'][0]['formula'];
+        $this->assertStringContainsString('avg(thickness_a)', $avgFormula);
+        
+        // Check SUM formula
+        $sumFormula = $product->measurement_points[2]['variables'][0]['formula'];
+        $this->assertStringContainsString('sum(thickness_a)', $sumFormula);
+        
+        // Check MIN formula
+        $minFormula = $product->measurement_points[3]['variables'][0]['formula'];
+        $this->assertStringContainsString('min(thickness_a)', $minFormula);
+        
+        // Check MAX formula
+        $maxFormula = $product->measurement_points[4]['variables'][0]['formula'];
+        $this->assertStringContainsString('max(thickness_a)', $maxFormula);
+        
+        // Check COUNT formula
+        $countFormula = $product->measurement_points[5]['variables'][0]['formula'];
+        $this->assertStringContainsString('count(thickness_a)', $countFormula);
+        
+        // Check complex formula (RANGE = MAX - MIN)
+        $rangeFormula = $product->measurement_points[6]['variables'][0]['formula'];
+        $this->assertStringContainsString('max(thickness_a)', $rangeFormula);
+        $this->assertStringContainsString('min(thickness_a)', $rangeFormula);
+    }
 }
