@@ -1,0 +1,42 @@
+{
+    "basic_info": {
+        "product_category_id": 1,
+        "product_name": "VO",
+        "ref_spec_number": "SPEC-COLOR-001",
+        "nom_size_vo": "14.4",
+        "article_code": "ART-001",
+        "no_document": "DOC-001",
+        "no_doc_reference": "REF-001",
+        "color": "Blue",
+        "size": "Large"
+    },
+    "measurement_points": [
+        {
+            "setup": {
+                "name": "Inside Diameter",
+                "name_id": "inside_diameter",
+                "sample_amount": 5,
+                "source": "MANUAL",
+                "type": "SINGLE",
+                "nature": "QUANTITATIVE"
+            },
+            "variables": [],
+            "pre_processing_formulas": [],
+            "evaluation_type": "PER_SAMPLE",
+            "evaluation_setting": {
+                "per_sample_setting": {
+                    "is_raw_data": true,
+                    "pre_processing_formula_name": null
+                }
+            },
+            "rule_evaluation_setting": {
+                "rule": "BETWEEN",
+                "unit": "mm",
+                "value": 14.4,
+                "tolerance_minus": 0.3,
+                "tolerance_plus": 0.3
+            }
+        }
+    ]
+}
+
