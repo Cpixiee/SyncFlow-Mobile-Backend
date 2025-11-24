@@ -118,16 +118,16 @@ class Product extends Model
         }
 
         $setup = $point['setup'];
-        
+
         // Base required fields
         $requiredSetupFields = ['name', 'name_id', 'sample_amount', 'nature'];
-        
+
         // Add source and type as required only if nature is QUANTITATIVE
         if (isset($setup['nature']) && $setup['nature'] === 'QUANTITATIVE') {
             $requiredSetupFields[] = 'source';
             $requiredSetupFields[] = 'type';
         }
-        
+
         foreach ($requiredSetupFields as $field) {
             if (!isset($setup[$field]) || empty($setup[$field])) {
                 $errors[] = $pointPrefix . "Setup.{$field} wajib diisi";
@@ -137,11 +137,6 @@ class Product extends Model
         // Validate source-specific fields
         if (isset($setup['source'])) {
             switch ($setup['source']) {
-                case 'INSTRUMENT':
-                    if (!isset($setup['source_instrument_id']) || empty($setup['source_instrument_id'])) {
-                        $errors[] = $pointPrefix . 'source_instrument_id wajib diisi untuk source INSTRUMENT';
-                    }
-                    break;
                 case 'DERIVED':
                     if (!isset($setup['source_derived_name_id']) || empty($setup['source_derived_name_id'])) {
                         $errors[] = $pointPrefix . 'source_derived_name_id wajib diisi untuk source DERIVED';
@@ -216,11 +211,11 @@ class Product extends Model
         }
 
         $query = self::where('product_category_id', $basicInfo['product_category_id'])
-                    ->where('product_name', $basicInfo['product_name']);
+            ->where('product_name', $basicInfo['product_name']);
 
         // Check optional fields
         $optionalFields = ['ref_spec_number', 'nom_size_vo', 'article_code', 'no_document', 'no_doc_reference', 'color', 'size'];
-        
+
         foreach ($optionalFields as $field) {
             if (isset($basicInfo[$field]) && !empty($basicInfo[$field])) {
                 $query->where($field, $basicInfo[$field]);
@@ -238,7 +233,7 @@ class Product extends Model
     public function getMeasurementPointByNameId(string $nameId): ?array
     {
         $measurementPoints = $this->measurement_points ?? [];
-        
+
         foreach ($measurementPoints as $point) {
             if (isset($point['setup']['name_id']) && $point['setup']['name_id'] === $nameId) {
                 return $point;
