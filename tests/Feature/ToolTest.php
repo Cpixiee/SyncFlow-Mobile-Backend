@@ -69,8 +69,8 @@ class ToolTest extends TestCase
                         'tool_model',
                         'tool_type',
                         'tool_type_description',
-                        'last_calibration',
-                        'next_calibration',
+                        'last_calibration_at',
+                        'next_calibration_at',
                         'imei',
                         'status',
                         'status_description',
@@ -296,7 +296,7 @@ class ToolTest extends TestCase
             'tool_name' => 'New Caliper',
             'tool_model' => 'Mitutoyo CD-6',
             'tool_type' => 'MECHANICAL',
-            'last_calibration' => '2025-01-15',
+            'last_calibration_at' => '2025-01-15',
             'imei' => 'NEW-001',
             'status' => 'ACTIVE'
         ];
@@ -331,7 +331,7 @@ class ToolTest extends TestCase
             'tool_name' => 'Test Tool',
             'tool_model' => 'Test Model',
             'tool_type' => 'MECHANICAL',
-            'last_calibration' => '2025-01-15',
+            'last_calibration_at' => '2025-01-15',
             'imei' => 'TEST-001'
         ];
 
@@ -341,8 +341,8 @@ class ToolTest extends TestCase
         $response->assertStatus(201);
         
         $data = $response->json('data');
-        $this->assertEquals('2025-01-15', $data['last_calibration']);
-        $this->assertEquals('2026-01-15', $data['next_calibration']);
+        $this->assertEquals('2025-01-15', $data['last_calibration_at']);
+        $this->assertEquals('2026-01-15', $data['next_calibration_at']);
     }
 
     /** @test */
@@ -449,13 +449,13 @@ class ToolTest extends TestCase
     public function test_auto_updates_next_calibration_on_update()
     {
         $tool = Tool::factory()->create([
-            'last_calibration' => Carbon::parse('2024-01-01'),
-            'next_calibration' => Carbon::parse('2025-01-01'),
+            'last_calibration_at' => Carbon::parse('2024-01-01'),
+            'next_calibration_at' => Carbon::parse('2025-01-01'),
             'imei' => 'TEST-001'
         ]);
 
         $updateData = [
-            'last_calibration' => '2025-06-15'
+            'last_calibration_at' => '2025-06-15'
         ];
 
         $response = $this->actingAsUser($this->adminUser)
@@ -464,8 +464,8 @@ class ToolTest extends TestCase
         $this->assertApiSuccess($response);
         
         $data = $response->json('data');
-        $this->assertEquals('2025-06-15', $data['last_calibration']);
-        $this->assertEquals('2026-06-15', $data['next_calibration']);
+        $this->assertEquals('2025-06-15', $data['last_calibration_at']);
+        $this->assertEquals('2026-06-15', $data['next_calibration_at']);
     }
 
     /** @test */

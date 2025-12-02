@@ -32,7 +32,7 @@ class IssueController extends Controller
             $page = $request->input('page', 1);
             $limit = $request->input('limit', 10);
 
-            $query = Issue::with(['creator:id,username,role', 'comments']);
+            $query = Issue::with(['creator:id,username,role', 'comments.user:id,username,role']);
 
             // Filter by status
             if ($request->has('status')) {

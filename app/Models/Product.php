@@ -57,6 +57,14 @@ class Product extends Model
     }
 
     /**
+     * Relationship dengan scale measurements
+     */
+    public function scaleMeasurements(): HasMany
+    {
+        return $this->hasMany(ScaleMeasurement::class);
+    }
+
+    /**
      * Boot method untuk auto-generate product_id
      */
     protected static function boot()

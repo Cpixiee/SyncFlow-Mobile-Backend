@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\MeasurementController;
 use App\Http\Controllers\Api\V1\ProductController;
 use App\Http\Controllers\Api\V1\ProductMeasurementController;
+use App\Http\Controllers\Api\V1\ScaleMeasurementController;
 use App\Http\Controllers\Api\V1\ProductCategoryController;
 use App\Http\Controllers\Api\V1\MeasurementInstrumentController;
 use App\Http\Controllers\Api\V1\ToolController;
@@ -62,6 +63,22 @@ Route::prefix('v1')->group(function () {
         });
 
         // Product Measurements List - for Monthly Target page
+
+        // Scale Measurement routes
+        Route::prefix('scale-measurement')->group(function () {
+            // Admin dan SuperAdmin only routes (Update & Delete)
+            Route::middleware('role:admin,superadmin')->group(function () {
+                Route::put('/{scaleMeasurementId}', [ScaleMeasurementController::class, 'update']);
+                Route::delete('/{scaleMeasurementId}', [ScaleMeasurementController::class, 'destroy']);
+            });
+            
+            // All authenticated users (Operator, Admin, SuperAdmin) - View & Create
+            Route::get('/available-products', [ScaleMeasurementController::class, 'getAvailableProducts']);
+            Route::get('/', [ScaleMeasurementController::class, 'index']);
+            Route::get('/{scaleMeasurementId}', [ScaleMeasurementController::class, 'show']);
+            Route::post('/', [ScaleMeasurementController::class, 'store']);
+            Route::post('/bulk', [ScaleMeasurementController::class, 'bulkStore']);
+        });
 
         // Product Categories - available for authenticated users
         Route::prefix('product-categories')->group(function () {
@@ -123,8 +140,9 @@ Route::prefix('v1')->group(function () {
             Route::get('/unread-count', [\App\Http\Controllers\Api\V1\NotificationController::class, 'getUnreadCount']);
             Route::post('/{id}/mark-as-read', [\App\Http\Controllers\Api\V1\NotificationController::class, 'markAsRead']);
             Route::post('/mark-all-as-read', [\App\Http\Controllers\Api\V1\NotificationController::class, 'markAllAsRead']);
+            // Specific route BEFORE generic {id} route
+            Route::delete('/all-read', [\App\Http\Controllers\Api\V1\NotificationController::class, 'deleteAllRead']);
             Route::delete('/{id}', [\App\Http\Controllers\Api\V1\NotificationController::class, 'destroy']);
-            Route::delete('/read/all', [\App\Http\Controllers\Api\V1\NotificationController::class, 'deleteAllRead']);
         });
     });
 });

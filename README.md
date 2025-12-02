@@ -362,38 +362,262 @@ POST /api/v1/login
 
 ### Main Endpoints
 
-| Method | Endpoint | Description | Auth |
-|--------|----------|-------------|------|
-| **Products** ||||
-| POST | `/api/v1/products` | Create product | Admin/SuperAdmin |
-| GET | `/api/v1/products` | List products | Admin/SuperAdmin |
-| GET | `/api/v1/products/{id}` | Get product detail | Admin/SuperAdmin |
-| GET | `/api/v1/products/categories` | Get product categories | Admin/SuperAdmin |
-| GET | `/api/v1/products/{id}/measurement-items/suggest` | Autocomplete | All |
-| **Measurements** ||||
-| POST | `/api/v1/product-measurement` | Create measurement | All |
-| GET | `/api/v1/product-measurement` | List measurements | All |
-| POST | `/api/v1/product-measurement/{id}/submit` | Submit measurement | All |
-| **Instruments** ||||
-| GET | `/api/v1/measurement-instruments` | List instruments | All |
-| GET | `/api/v1/measurement-instruments/{id}` | Get instrument detail | All |
-| **Tools** ||||
-| GET | `/api/v1/tools` | List tools | All |
-| GET | `/api/v1/tools/models` | Get tool models | All |
-| GET | `/api/v1/tools/by-model` | Get tools by model | All |
-| POST | `/api/v1/tools` | Create tool | Admin/SuperAdmin |
-| **Issues** ||||
-| GET | `/api/v1/issues` | List issues | All |
-| POST | `/api/v1/issues` | Create issue | Admin/SuperAdmin |
-| POST | `/api/v1/issues/{id}/comments` | Add comment | All |
+| Method | Endpoint | Description | Operator | Admin | SuperAdmin |
+|--------|----------|-------------|----------|-------|------------|
+| **Authentication** ||||||
+| POST | `/api/v1/login` | Login user | ✅ | ✅ | ✅ |
+| POST | `/api/v1/logout` | Logout user | ✅ | ✅ | ✅ |
+| POST | `/api/v1/refresh` | Refresh token | ✅ | ✅ | ✅ |
+| **Products** ||||||
+| POST | `/api/v1/products` | Create product | ❌ | ✅ | ✅ |
+| GET | `/api/v1/products` | List products | ✅ | ✅ | ✅ |
+| GET | `/api/v1/products/{id}` | Get product detail | ✅ | ✅ | ✅ |
+| PUT | `/api/v1/products/{id}` | Update product | ❌ | ✅ | ✅ |
+| DELETE | `/api/v1/products/{id}` | Delete product | ❌ | ✅ | ✅ |
+| **Product Categories** ||||||
+| GET | `/api/v1/products/categories` | Get categories | ✅ | ✅ | ✅ |
+| GET | `/api/v1/products/{id}/measurement-items/suggest` | Formula autocomplete | ✅ | ✅ | ✅ |
+| **Product Measurement** ||||||
+| GET | `/api/v1/product-measurement` | List measurements | ✅ | ✅ | ✅ |
+| GET | `/api/v1/product-measurement/available-products` | Get available products | ✅ | ✅ | ✅ |
+| POST | `/api/v1/product-measurement` | Create measurement | ✅ | ✅ | ✅ |
+| POST | `/api/v1/product-measurement/bulk` | Bulk create | ✅ | ✅ | ✅ |
+| GET | `/api/v1/product-measurement/{id}` | Get single measurement | ✅ | ✅ | ✅ |
+| POST | `/api/v1/product-measurement/{id}/set-batch-number` | Set batch number | ✅ | ✅ | ✅ |
+| POST | `/api/v1/product-measurement/{id}/check-samples` | Check samples | ✅ | ✅ | ✅ |
+| POST | `/api/v1/product-measurement/{id}/save-progress` | Save progress | ✅ | ✅ | ✅ |
+| POST | `/api/v1/product-measurement/{id}/submit` | Submit measurement | ✅ | ✅ | ✅ |
+| **Scale Measurement** ||||||
+| GET | `/api/v1/scale-measurement` | List scale measurements | ✅ | ✅ | ✅ |
+| GET | `/api/v1/scale-measurement/available-products` | Get available products | ✅ | ✅ | ✅ |
+| GET | `/api/v1/scale-measurement/{id}` | Get single | ✅ | ✅ | ✅ |
+| POST | `/api/v1/scale-measurement` | Create measurement | ✅ | ✅ | ✅ |
+| POST | `/api/v1/scale-measurement/bulk` | Bulk create | ✅ | ✅ | ✅ |
+| PUT | `/api/v1/scale-measurement/{id}` | Update measurement | ❌ | ✅ | ✅ |
+| DELETE | `/api/v1/scale-measurement/{id}` | Delete measurement | ❌ | ✅ | ✅ |
+| **Measurement Instruments** ||||||
+| GET | `/api/v1/measurement-instruments` | List instruments | ✅ | ✅ | ✅ |
+| GET | `/api/v1/measurement-instruments/{id}` | Get instrument detail | ✅ | ✅ | ✅ |
+| **Tools** ||||||
+| GET | `/api/v1/tools` | List tools | ✅ | ✅ | ✅ |
+| GET | `/api/v1/tools/models` | Get tool models | ✅ | ✅ | ✅ |
+| GET | `/api/v1/tools/by-model` | Get tools by model | ✅ | ✅ | ✅ |
+| POST | `/api/v1/tools` | Create tool | ❌ | ✅ | ✅ |
+| **Issues** ||||||
+| GET | `/api/v1/issues` | List issues | ✅ | ✅ | ✅ |
+| GET | `/api/v1/issues/{id}` | Get issue detail | ✅ | ✅ | ✅ |
+| POST | `/api/v1/issues` | Create issue | ❌ | ✅ | ✅ |
+| PUT | `/api/v1/issues/{id}` | Update issue | ❌ | ✅ | ✅ |
+| POST | `/api/v1/issues/{id}/comments` | Add comment | ✅ | ✅ | ✅ |
+| **Quarters** ||||||
+| GET | `/api/v1/quarters` | List quarters | ✅ | ✅ | ✅ |
+| GET | `/api/v1/quarters/active` | Get active quarter | ✅ | ✅ | ✅ |
+| **Notifications** ||||||
+| GET | `/api/v1/notifications` | List notifications | ✅ | ✅ | ✅ |
+| GET | `/api/v1/notifications/{id}` | Get single notification | ✅ | ✅ | ✅ |
+| PUT | `/api/v1/notifications/{id}/read` | Mark as read | ✅ | ✅ | ✅ |
+| PUT | `/api/v1/notifications/read-all` | Mark all as read | ✅ | ✅ | ✅ |
+| DELETE | `/api/v1/notifications/{id}` | Delete notification | ✅ | ✅ | ✅ |
 
 ### Response Format
 
 All API endpoints use consistent response format:
-- **Success:** `http_code: 200/201`, `message`, `data`
-- **Error:** `http_code: 400/404/500`, `message`, `error_id`, `data` (validation errors)
 
-> 📖 **Full response examples:** See individual API documentation files
+**Success Response:**
+```json
+{
+  "http_code": 200,
+  "message": "Success message",
+  "error_id": null,
+  "data": { ... }
+}
+```
+
+**Error Response:**
+```json
+{
+  "http_code": 400,
+  "message": "Error message",
+  "error_id": "ERROR_CODE",
+  "data": null
+}
+```
+
+**Validation Error:**
+```json
+{
+  "http_code": 400,
+  "message": "Validation failed",
+  "data": {
+    "field_name": ["Error message"]
+  }
+}
+```
+
+### Quick Examples for Frontend
+
+#### Scale Measurement (Daily Weight Tracking)
+
+**1. Create Measurement**
+```bash
+POST /api/v1/scale-measurement
+Authorization: Bearer {token}
+
+{
+  "product_id": "PRD-A1B2C3D4",
+  "measurement_date": "2025-12-02",
+  "weight": 4.5,              # Optional, bisa null
+  "notes": "Morning check"     # Optional
+}
+
+# Response:
+{
+  "http_code": 201,
+  "data": {
+    "scale_measurement_id": "SCL-X1Y2Z3A4",
+    "status": "CHECKED"  # CHECKED jika weight ≠ null, NOT_CHECKED jika weight = null
+  }
+}
+```
+
+**2. Bulk Create (untuk setup target harian)**
+```bash
+POST /api/v1/scale-measurement/bulk
+Authorization: Bearer {token}
+
+{
+  "product_ids": ["PRD-001", "PRD-002", "PRD-003"],
+  "measurement_date": "2025-12-02"
+}
+
+# Response: Semua dibuat dengan status NOT_CHECKED (weight = null)
+{
+  "http_code": 201,
+  "data": {
+    "PRD-001": "SCL-AAA111",
+    "PRD-002": "SCL-BBB222",
+    "PRD-003": "SCL-CCC333"
+  }
+}
+```
+
+**3. Get List dengan Filter**
+```bash
+# Filter by date
+GET /api/v1/scale-measurement?date=2025-12-02
+
+# Filter yang belum dicek (untuk monitoring)
+GET /api/v1/scale-measurement?status=NOT_CHECKED&date=2025-12-02
+
+# Filter yang sudah dicek
+GET /api/v1/scale-measurement?status=CHECKED&date=2025-12-02
+
+# Filter date range (untuk reporting)
+GET /api/v1/scale-measurement?start_date=2025-12-01&end_date=2025-12-07
+
+# Search by product name/code
+GET /api/v1/scale-measurement?query=CIVIUSAS
+
+# Response:
+{
+  "http_code": 200,
+  "data": [
+    {
+      "scale_measurement_id": "SCL-X1Y2Z3A4",
+      "measurement_date": "2025-12-02",
+      "weight": 4.5,
+      "status": "CHECKED",  # NOT_CHECKED atau CHECKED
+      "product": {
+        "id": "PRD-A1B2C3D4",
+        "product_name": "CIVIUSAS-S",
+        "article_code": "ART-001"
+      },
+      "measured_by": {
+        "username": "operator1"
+      }
+    }
+  ],
+  "pagination": {
+    "current_page": 1,
+    "total_docs": 10
+  }
+}
+```
+
+**4. Update Weight (Admin Only)**
+```bash
+PUT /api/v1/scale-measurement/SCL-X1Y2Z3A4
+Authorization: Bearer {admin_token}
+
+{
+  "weight": 5.2,
+  "notes": "Updated"
+}
+
+# ⚠️ Operator coba update → 403 Forbidden
+```
+
+**5. Available Products**
+```bash
+# Get products yang belum ada measurement hari ini
+GET /api/v1/scale-measurement/available-products?date=2025-12-02
+
+# Response: Products yang bisa di-create
+{
+  "http_code": 200,
+  "data": [
+    {
+      "id": "PRD-A1B2C3D4",
+      "product_name": "CIVIUSAS-S",
+      "article_code": "ART-001"
+    }
+  ]
+}
+```
+
+---
+
+#### Product Measurement (Quarter-based)
+
+```bash
+# Filter by quarter
+GET /api/v1/product-measurement?quarter_id=1
+
+# Filter by status
+GET /api/v1/product-measurement?status=IN_PROGRESS
+
+# Filter by product category
+GET /api/v1/product-measurement?product_category_id=1
+```
+
+---
+
+### 📖 Important Notes for Frontend
+
+**Scale Measurement:**
+- ✅ **Operator BISA:** View, Create, Bulk Create
+- ❌ **Operator TIDAK BISA:** Update, Delete (403 Forbidden)
+- 📅 **Limit:** 1 product per hari (duplicate return 400)
+- 🔄 **Status Otomatis:**
+  - weight = null → `NOT_CHECKED`
+  - weight ≠ null → `CHECKED`
+- 🚫 **Tidak ada OK/NG judgment** (hanya record data)
+
+**Access Control Matrix:**
+
+| Endpoint | Operator | Admin/SuperAdmin |
+|----------|----------|------------------|
+| GET (view) | ✅ | ✅ |
+| POST (create) | ✅ | ✅ |
+| PUT (update) | ❌ 403 | ✅ |
+| DELETE | ❌ 403 | ✅ |
+
+---
+
+> 📖 **Full API documentation:**
+> - **[Scale Measurement API](SCALE_MEASUREMENT.md)** - Complete guide dengan semua contoh payload
+> - **[API Changes & Integration Guide](API_CHANGES_AND_INTEGRATION_GUIDE.md)** - Complete API guide
+> - **[Formula System Documentation](FORMULA_SYSTEM_DOCUMENTATION.md)** - Formula guide
 
 ---
 

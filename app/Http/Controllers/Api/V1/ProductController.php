@@ -31,13 +31,13 @@ class ProductController extends Controller
                 'basic_info.article_code' => 'nullable|string',
                 'basic_info.no_document' => 'nullable|string',
                 'basic_info.no_doc_reference' => 'nullable|string',
-                'basic_info.color' => 'nullable|string|regex:/^#?[0-9A-Fa-f]{6}$/',
+                'basic_info.color' => 'nullable|string|max:50',
                 'basic_info.size' => 'nullable|string',
 
                 // Measurement Points
                 'measurement_points' => 'required|array|min:1',
                 'measurement_points.*.setup.name' => 'required|string',
-                'measurement_points.*.setup.name_id' => 'required|string|regex:/^[a-zA-Z_]+$/',
+                'measurement_points.*.setup.name_id' => 'nullable|string|regex:/^[a-zA-Z_]+$/',
                 'measurement_points.*.setup.sample_amount' => 'required|integer|min:1',
                 'measurement_points.*.setup.nature' => 'required|in:QUALITATIVE,QUANTITATIVE',
 
@@ -139,15 +139,12 @@ class ProductController extends Controller
                 return $this->errorResponse('Name validation failed', 'NAME_UNIQUENESS_ERROR', 400, $nameValidationErrors);
             }
 
-            // Get active quarter
+            // Get active quarter (optional - quarter is only for measurement results, not product creation)
             $activeQuarter = Quarter::getActiveQuarter();
-            if (!$activeQuarter) {
-                return $this->errorResponse('Tidak ada quarter aktif', 'NO_ACTIVE_QUARTER', 400);
-            }
 
-            // Create product
+            // Create product (quarter_id is nullable)
             $product = Product::create([
-                'quarter_id' => $activeQuarter->id,
+                'quarter_id' => $activeQuarter?->id,
                 'product_category_id' => $basicInfo['product_category_id'],
                 'product_name' => $basicInfo['product_name'],
                 'ref_spec_number' => $basicInfo['ref_spec_number'] ?? null,
@@ -351,7 +348,7 @@ class ProductController extends Controller
                 'article_code' => 'nullable|string|max:255',
                 'no_document' => 'nullable|string|max:255',
                 'no_doc_reference' => 'nullable|string|max:255',
-                'color' => 'nullable|string|regex:/^#?[0-9A-Fa-f]{6}$/',
+                'color' => 'nullable|string|max:50',
                 'size' => 'nullable|string|max:255',
             ]);
 
@@ -394,9 +391,11 @@ class ProductController extends Controller
                 return $this->notFoundResponse('Product tidak ditemukan');
             }
 
-            // Check if product has any product measurements
-            $hasMeasurements = $product->productMeasurements()->exists();
-            if ($hasMeasurements) {
+            // Check if product has any measurements
+            $hasProductMeasurements = $product->productMeasurements()->exists();
+            $hasScaleMeasurements = $product->scaleMeasurements()->exists();
+            
+            if ($hasProductMeasurements || $hasScaleMeasurements) {
                 return $this->errorResponse(
                     'Product tidak dapat dihapus karena sudah memiliki measurement data',
                     'PRODUCT_HAS_MEASUREMENTS',
@@ -438,7 +437,7 @@ class ProductController extends Controller
                 'basic_info.article_code' => 'nullable|string',
                 'basic_info.no_document' => 'nullable|string',
                 'basic_info.no_doc_reference' => 'nullable|string',
-                'basic_info.color' => 'nullable|string|regex:/^#?[0-9A-Fa-f]{6}$/',
+                'basic_info.color' => 'nullable|string|max:50',
                 'basic_info.size' => 'nullable|string',
 
                 // Measurement Points - optional untuk update

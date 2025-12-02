@@ -180,8 +180,8 @@ class ToolController extends Controller
                     'tool_model' => $tool->tool_model,
                     'tool_type' => $tool->tool_type->value,
                     'tool_type_description' => $tool->tool_type->getDescription(),
-                    'last_calibration' => $tool->last_calibration?->format('Y-m-d'),
-                    'next_calibration' => $tool->next_calibration?->format('Y-m-d'),
+                    'last_calibration_at' => $tool->last_calibration_at?->format('Y-m-d'),
+                    'next_calibration_at' => $tool->next_calibration_at?->format('Y-m-d'),
                     'imei' => $tool->imei,
                     'status' => $tool->status->value,
                     'status_description' => $tool->status->getDescription(),
@@ -286,6 +286,30 @@ class ToolController extends Controller
 
             if (!$tool) {
                 return $this->notFoundResponse('Tool not found');
+            }
+
+            // Check if tool is being used in any products
+            // Using JSON query to properly search in measurement_points
+            $products = \App\Models\Product::all();
+            $isUsedInProducts = false;
+            
+            foreach ($products as $product) {
+                $measurementPoints = $product->measurement_points ?? [];
+                foreach ($measurementPoints as $point) {
+                    if (isset($point['setup']['source_tool_model']) && 
+                        $point['setup']['source_tool_model'] === $tool->tool_model) {
+                        $isUsedInProducts = true;
+                        break 2;
+                    }
+                }
+            }
+
+            if ($isUsedInProducts) {
+                return $this->errorResponse(
+                    'Tool tidak dapat dihapus karena sedang digunakan di products',
+                    'TOOL_IN_USE',
+                    400
+                );
             }
 
             $tool->delete();

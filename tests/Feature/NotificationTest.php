@@ -316,7 +316,7 @@ class NotificationTest extends TestCase
 
         // Delete all read
         $response = $this->actingAsUser($this->user)
-            ->deleteJson('/api/v1/notifications/read/all');
+            ->deleteJson('/api/v1/notifications/all-read');
 
         $response->assertStatus(200)
             ->assertJson([

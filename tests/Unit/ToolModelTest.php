@@ -23,8 +23,8 @@ class ToolModelTest extends TestCase
         $this->assertContains('tool_name', $fillable);
         $this->assertContains('tool_model', $fillable);
         $this->assertContains('tool_type', $fillable);
-        $this->assertContains('last_calibration', $fillable);
-        $this->assertContains('next_calibration', $fillable);
+        $this->assertContains('last_calibration_at', $fillable);
+        $this->assertContains('next_calibration_at', $fillable);
         $this->assertContains('imei', $fillable);
         $this->assertContains('status', $fillable);
     }
@@ -35,15 +35,15 @@ class ToolModelTest extends TestCase
         $tool = Tool::factory()->create([
             'tool_type' => ToolType::MECHANICAL,
             'status' => ToolStatus::ACTIVE,
-            'last_calibration' => '2025-01-15',
-            'next_calibration' => '2026-01-15',
+            'last_calibration_at' => '2025-01-15',
+            'next_calibration_at' => '2026-01-15',
             'imei' => 'TEST-001'
         ]);
 
         $this->assertInstanceOf(ToolType::class, $tool->tool_type);
         $this->assertInstanceOf(ToolStatus::class, $tool->status);
-        $this->assertInstanceOf(Carbon::class, $tool->last_calibration);
-        $this->assertInstanceOf(Carbon::class, $tool->next_calibration);
+        $this->assertInstanceOf(Carbon::class, $tool->last_calibration_at);
+        $this->assertInstanceOf(Carbon::class, $tool->next_calibration_at);
     }
 
     /** @test */
@@ -53,15 +53,15 @@ class ToolModelTest extends TestCase
             'tool_name' => 'Test Tool',
             'tool_model' => 'Test Model',
             'tool_type' => ToolType::MECHANICAL,
-            'last_calibration' => Carbon::parse('2025-01-15'),
+            'last_calibration_at' => Carbon::parse('2025-01-15'),
             'imei' => 'TEST-001',
             'status' => ToolStatus::ACTIVE
         ]);
 
-        $this->assertNotNull($tool->next_calibration);
+        $this->assertNotNull($tool->next_calibration_at);
         $this->assertEquals(
             '2026-01-15',
-            Carbon::parse($tool->next_calibration)->format('Y-m-d')
+            Carbon::parse($tool->next_calibration_at)->format('Y-m-d')
         );
     }
 
@@ -69,24 +69,24 @@ class ToolModelTest extends TestCase
     public function test_auto_updates_next_calibration_on_update()
     {
         $tool = Tool::factory()->create([
-            'last_calibration' => Carbon::parse('2024-01-01'),
-            'next_calibration' => Carbon::parse('2025-01-01'),
+            'last_calibration_at' => Carbon::parse('2024-01-01'),
+            'next_calibration_at' => Carbon::parse('2025-01-01'),
             'imei' => 'TEST-001'
         ]);
 
         $tool->update([
-            'last_calibration' => Carbon::parse('2025-06-15')
+            'last_calibration_at' => Carbon::parse('2025-06-15')
         ]);
 
         $tool->refresh();
 
         $this->assertEquals(
             '2025-06-15',
-            Carbon::parse($tool->last_calibration)->format('Y-m-d')
+            Carbon::parse($tool->last_calibration_at)->format('Y-m-d')
         );
         $this->assertEquals(
             '2026-06-15',
-            Carbon::parse($tool->next_calibration)->format('Y-m-d')
+            Carbon::parse($tool->next_calibration_at)->format('Y-m-d')
         );
     }
 
@@ -97,12 +97,12 @@ class ToolModelTest extends TestCase
             'tool_name' => 'Test Tool',
             'tool_model' => 'Test Model',
             'tool_type' => ToolType::MECHANICAL,
-            'last_calibration' => null,
+            'last_calibration_at' => null,
             'imei' => 'TEST-001',
             'status' => ToolStatus::ACTIVE
         ]);
 
-        $this->assertNull($tool->next_calibration);
+        $this->assertNull($tool->next_calibration_at);
     }
 
     /** @test */
@@ -262,7 +262,7 @@ class ToolModelTest extends TestCase
             'tool_name' => 'Digital Caliper Lab 1',
             'tool_model' => 'Mitutoyo CD-6',
             'tool_type' => ToolType::MECHANICAL,
-            'last_calibration' => Carbon::parse('2025-01-15'),
+            'last_calibration_at' => Carbon::parse('2025-01-15'),
             'imei' => 'MIT-CD6-001',
             'status' => ToolStatus::ACTIVE
         ]);

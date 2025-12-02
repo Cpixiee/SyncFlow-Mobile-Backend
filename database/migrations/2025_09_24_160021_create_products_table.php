@@ -14,7 +14,7 @@ return new class extends Migration
         Schema::create('products', function (Blueprint $table) {
             $table->id();
             $table->string('product_id')->unique(); // Custom product ID
-            $table->foreignId('quarter_id')->constrained('quarters');
+            $table->foreignId('quarter_id')->nullable()->constrained('quarters'); // Nullable: quarter only for measurement results
             $table->foreignId('product_category_id')->constrained('product_categories');
             
             // Basic Info Fields
