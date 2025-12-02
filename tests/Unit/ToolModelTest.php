@@ -17,9 +17,9 @@ class ToolModelTest extends TestCase
     public function test_tool_has_correct_fillable_attributes()
     {
         $tool = new Tool();
-        
+
         $fillable = $tool->getFillable();
-        
+
         $this->assertContains('tool_name', $fillable);
         $this->assertContains('tool_model', $fillable);
         $this->assertContains('tool_type', $fillable);
@@ -61,7 +61,7 @@ class ToolModelTest extends TestCase
         $this->assertNotNull($tool->next_calibration);
         $this->assertEquals(
             '2026-01-15',
-            $tool->next_calibration->format('Y-m-d')
+            Carbon::parse($tool->next_calibration)->format('Y-m-d')
         );
     }
 
@@ -79,14 +79,14 @@ class ToolModelTest extends TestCase
         ]);
 
         $tool->refresh();
-        
+
         $this->assertEquals(
             '2025-06-15',
-            $tool->last_calibration->format('Y-m-d')
+            Carbon::parse($tool->last_calibration)->format('Y-m-d')
         );
         $this->assertEquals(
             '2026-06-15',
-            $tool->next_calibration->format('Y-m-d')
+            Carbon::parse($tool->next_calibration)->format('Y-m-d')
         );
     }
 
@@ -112,12 +112,12 @@ class ToolModelTest extends TestCase
             'status' => ToolStatus::ACTIVE,
             'imei' => 'ACTIVE-001'
         ]);
-        
+
         Tool::factory()->create([
             'status' => ToolStatus::ACTIVE,
             'imei' => 'ACTIVE-002'
         ]);
-        
+
         Tool::factory()->create([
             'status' => ToolStatus::INACTIVE,
             'imei' => 'INACTIVE-001'
@@ -138,12 +138,12 @@ class ToolModelTest extends TestCase
             'tool_model' => 'Mitutoyo CD-6',
             'imei' => 'MIT-001'
         ]);
-        
+
         Tool::factory()->create([
             'tool_model' => 'Mitutoyo CD-6',
             'imei' => 'MIT-002'
         ]);
-        
+
         Tool::factory()->create([
             'tool_model' => 'Keyence LK-G5001',
             'imei' => 'KEY-001'
@@ -165,19 +165,19 @@ class ToolModelTest extends TestCase
             'status' => ToolStatus::ACTIVE,
             'imei' => 'MIT-001'
         ]);
-        
+
         Tool::factory()->create([
             'tool_model' => 'Mitutoyo CD-6',
             'status' => ToolStatus::ACTIVE,
             'imei' => 'MIT-002'
         ]);
-        
+
         Tool::factory()->create([
             'tool_model' => 'Keyence LK-G5001',
             'status' => ToolStatus::ACTIVE,
             'imei' => 'KEY-001'
         ]);
-        
+
         // Inactive tool - should not be included
         Tool::factory()->create([
             'tool_model' => 'Inactive Model',
@@ -203,14 +203,14 @@ class ToolModelTest extends TestCase
             'status' => ToolStatus::ACTIVE,
             'imei' => 'MIT-001'
         ]);
-        
+
         Tool::factory()->create([
             'tool_name' => 'Caliper 2',
             'tool_model' => 'Mitutoyo CD-6',
             'status' => ToolStatus::ACTIVE,
             'imei' => 'MIT-002'
         ]);
-        
+
         Tool::factory()->create([
             'tool_name' => 'Caliper 3',
             'tool_model' => 'Mitutoyo CD-6',
@@ -285,7 +285,7 @@ class ToolModelTest extends TestCase
         Tool::factory()->create(['imei' => 'UNIQUE-001']);
 
         $this->expectException(\Illuminate\Database\QueryException::class);
-        
+
         Tool::factory()->create(['imei' => 'UNIQUE-001']);
     }
 

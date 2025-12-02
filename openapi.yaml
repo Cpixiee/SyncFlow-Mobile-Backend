@@ -1,0 +1,2231 @@
+openapi: 3.0.3
+info:
+  title: SyncFlow - Quality Control & Measurement API
+  description: |
+    **SyncFlow** is a comprehensive quality control and measurement management system with advanced formula calculation capabilities.
+    
+    ## Features
+    - 📊 Product & Measurement Management
+    - 🧮 Advanced Formula System (40+ mathematical functions)
+    - 🔧 Tools & Instruments Management
+    - 🐛 Issue Tracking
+    - 🔐 JWT-based Authentication with Role-based Access Control
+    
+    ## Authentication
+    All protected endpoints require a JWT Bearer token in the Authorization header.
+    Tokens can be obtained from the `/api/v1/login` endpoint.
+    
+    ## Roles
+    - **user**: Basic access to measurements and viewing
+    - **admin**: Can create products, tools, and issues
+    - **superadmin**: Full system access including user management
+    
+    ## Response Format
+    All endpoints return responses in the following format:
+    ```json
+    {
+      "http_code": 200,
+      "message": "Success message",
+      "error_id": null,
+      "data": { ... }
+    }
+    ```
+    
+    ## Error Codes
+    - `VALIDATION_ERROR`: Request validation failed
+    - `UNAUTHORIZED`: Authentication required
+    - `FORBIDDEN`: Insufficient permissions
+    - `NOT_FOUND`: Resource not found
+    - `SERVER_ERROR`: Internal server error
+    - `NO_ACTIVE_QUARTER`: No active quarter configured
+    
+  version: 1.1.0
+  contact:
+    name: SyncFlow API Support
+    email: support@syncflow.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8000/api
+    description: Local development server
+  - url: https://api.syncflow.com/api
+    description: Production server
+
+tags:
+  - name: Authentication
+    description: User authentication and account management
+  - name: Products
+    description: Product management and configuration
+  - name: Product Categories
+    description: Product category operations
+  - name: Measurements
+    description: Measurement data operations
+  - name: Product Measurements
+    description: Product measurement lifecycle management
+  - name: Measurement Instruments
+    description: Measurement instrument management
+  - name: Tools
+    description: Tool/equipment management
+  - name: Issues
+    description: Issue tracking and collaboration
+
+security:
+  - BearerAuth: []
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token obtained from /api/v1/login endpoint
+
+  schemas:
+    # Common Schemas
+    SuccessResponse:
+      type: object
+      properties:
+        http_code:
+          type: integer
+          example: 200
+        message:
+          type: string
+          example: Operation successful
+        error_id:
+          type: string
+          nullable: true
+          example: null
+        data:
+          type: object
+
+    ErrorResponse:
+      type: object
+      properties:
+        http_code:
+          type: integer
+          example: 400
+        message:
+          type: string
+          example: Request invalid
+        error_id:
+          type: string
+          example: VALIDATION_ERROR
+        data:
+          type: object
+          nullable: true
+
+    # Authentication Schemas
+    LoginRequest:
+      type: object
+      required:
+        - username
+        - password
+      properties:
+        username:
+          type: string
+          example: admin
+        password:
+          type: string
+          format: password
+          example: admin#1234
+
+    LoginResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessResponse'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                token:
+                  type: string
+                  description: JWT access token
+                user:
+                  $ref: '#/components/schemas/User'
+
+    User:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        username:
+          type: string
+          example: admin
+        role:
+          type: string
+          enum: [user, admin, superadmin]
+          example: admin
+        employee_id:
+          type: string
+          example: EMP-001
+        phone:
+          type: string
+          example: '+628123456789'
+        email:
+          type: string
+          format: email
+          example: admin@syncflow.com
+        position:
+          type: string
+          example: Quality Manager
+        department:
+          type: string
+          example: Quality Control
+        photo_url:
+          type: string
+          nullable: true
+        password_changed:
+          type: boolean
+          example: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateUserRequest:
+      type: object
+      required:
+        - username
+        - password
+        - role
+        - employee_id
+      properties:
+        username:
+          type: string
+          minLength: 3
+          example: john_doe
+        password:
+          type: string
+          format: password
+          minLength: 6
+          example: SecureP@ss123
+        role:
+          type: string
+          enum: [user, admin, superadmin]
+          example: user
+        employee_id:
+          type: string
+          example: EMP-002
+        phone:
+          type: string
+          example: '+628123456789'
+        email:
+          type: string
+          format: email
+          example: john@syncflow.com
+        position:
+          type: string
+          example: QC Inspector
+        department:
+          type: string
+          example: Quality Control
+        photo_url:
+          type: string
+          nullable: true
+
+    ChangePasswordRequest:
+      type: object
+      required:
+        - current_password
+        - new_password
+      properties:
+        current_password:
+          type: string
+          format: password
+        new_password:
+          type: string
+          format: password
+          minLength: 6
+        user_id:
+          type: integer
+          description: Required for admin password reset
+          example: 5
+
+    # Product Schemas
+    ProductBasicInfo:
+      type: object
+      required:
+        - product_category_id
+        - product_name
+      properties:
+        product_category_id:
+          type: integer
+          description: ID from /api/v1/products/categories endpoint
+          example: 93
+        product_name:
+          type: string
+          description: Must be in category's products array
+          example: COTO
+        ref_spec_number:
+          type: string
+          example: SPEC-001
+        nom_size_vo:
+          type: string
+          example: 12mm
+        article_code:
+          type: string
+          example: ART-001
+        no_document:
+          type: string
+          example: DOC-001
+        no_doc_reference:
+          type: string
+          example: REF-001
+        color:
+          type: string
+          example: Blue
+        size:
+          type: string
+          example: Medium
+
+    MeasurementPointSetup:
+      type: object
+      required:
+        - name
+        - name_id
+        - sample_amount
+        - nature
+      properties:
+        name:
+          type: string
+          description: Display name for the measurement point
+          example: Thickness Measurement
+        name_id:
+          type: string
+          description: Unique identifier (alphanumeric + underscore)
+          pattern: '^[a-zA-Z0-9_]+$'
+          example: thickness_a
+        sample_amount:
+          type: integer
+          minimum: 1
+          example: 3
+        source:
+          type: string
+          enum: [MANUAL, INSTRUMENT, TOOL, DERIVED]
+          description: Required for QUANTITATIVE measurements
+          example: INSTRUMENT
+        source_instrument_id:
+          type: integer
+          description: Required if source = INSTRUMENT
+          example: 1
+        source_tool_model:
+          type: string
+          description: Required if source = TOOL
+          example: MITUTOYO-CD-15CPX
+        source_derived_name_id:
+          type: string
+          description: Required if source = DERIVED (references another measurement item)
+          example: thickness_a
+        type:
+          type: string
+          enum: [SINGLE, BEFORE_AFTER]
+          description: Required for QUANTITATIVE measurements
+          example: SINGLE
+        nature:
+          type: string
+          enum: [QUANTITATIVE, QUALITATIVE]
+          example: QUANTITATIVE
+
+    Variable:
+      type: object
+      required:
+        - type
+        - name
+      properties:
+        type:
+          type: string
+          enum: [FIXED, MANUAL, FORMULA]
+          example: FORMULA
+        name:
+          type: string
+          example: calculated_value
+        value:
+          type: number
+          description: Required if type = FIXED
+          example: 0.1
+        formula:
+          type: string
+          description: Required if type = FORMULA (must start with =)
+          example: '=avg(thickness_a)'
+        is_show:
+          type: boolean
+          example: true
+
+    RuleEvaluationSetting:
+      type: object
+      required:
+        - rule
+        - unit
+        - value
+      properties:
+        rule:
+          type: string
+          enum: [MIN, MAX, BETWEEN]
+          example: BETWEEN
+        unit:
+          type: string
+          example: mm
+        value:
+          type: number
+          example: 2.5
+        tolerance_minus:
+          type: number
+          description: Required if rule = BETWEEN
+          example: 0.1
+        tolerance_plus:
+          type: number
+          description: Required if rule = BETWEEN
+          example: 0.1
+
+    MeasurementPoint:
+      type: object
+      required:
+        - setup
+        - evaluation_type
+        - evaluation_setting
+      properties:
+        setup:
+          $ref: '#/components/schemas/MeasurementPointSetup'
+        variables:
+          type: array
+          items:
+            $ref: '#/components/schemas/Variable'
+          nullable: true
+        pre_processing_formulas:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              formula:
+                type: string
+          nullable: true
+        evaluation_type:
+          type: string
+          enum: [PER_SAMPLE, JOINT, SKIP_CHECK]
+          example: PER_SAMPLE
+        evaluation_setting:
+          type: object
+          properties:
+            per_sample_setting:
+              type: object
+              properties:
+                is_raw_data:
+                  type: boolean
+                  example: true
+                pre_processing_formula_name:
+                  type: string
+                  nullable: true
+            joint_setting:
+              type: object
+              nullable: true
+            qualitative_setting:
+              type: object
+              nullable: true
+        rule_evaluation_setting:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/RuleEvaluationSetting'
+
+    CreateProductRequest:
+      type: object
+      required:
+        - basic_info
+        - measurement_points
+      properties:
+        basic_info:
+          $ref: '#/components/schemas/ProductBasicInfo'
+        measurement_points:
+          type: array
+          items:
+            $ref: '#/components/schemas/MeasurementPoint'
+        measurement_groups:
+          type: array
+          items:
+            type: object
+          nullable: true
+
+    Product:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        product_id:
+          type: string
+          example: PRD-ABC123XY
+        quarter_id:
+          type: integer
+          example: 1
+        basic_info:
+          $ref: '#/components/schemas/ProductBasicInfo'
+        measurement_points:
+          type: array
+          items:
+            $ref: '#/components/schemas/MeasurementPoint'
+        measurement_groups:
+          type: array
+          nullable: true
+        product_category:
+          $ref: '#/components/schemas/ProductCategory'
+        quarter:
+          type: object
+          properties:
+            id:
+              type: integer
+            year:
+              type: integer
+            quarter:
+              type: string
+            is_active:
+              type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    # Product Category Schemas
+    ProductCategory:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 93
+        name:
+          type: string
+          example: Tube Test
+        products:
+          type: array
+          items:
+            type: string
+          example: [VO, COTO, COT, COTO-FR]
+        description:
+          type: string
+          example: Kategori untuk testing tube
+
+    # Measurement Instrument Schemas
+    MeasurementInstrument:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        name:
+          type: string
+          example: Digital Caliper
+        model:
+          type: string
+          example: DC-150
+        serial_number:
+          type: string
+          example: DC001-2024
+        manufacturer:
+          type: string
+          example: Mitutoyo
+        status:
+          type: string
+          enum: [ACTIVE, INACTIVE]
+          example: ACTIVE
+        description:
+          type: string
+          example: High precision digital caliper
+        display_name:
+          type: string
+          example: Digital Caliper (DC001-2024)
+        needs_calibration:
+          type: boolean
+          example: true
+        last_calibration:
+          type: string
+          format: date
+          example: '2024-01-15'
+        next_calibration:
+          type: string
+          format: date
+          example: '2025-01-15'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    # Tool Schemas
+    Tool:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        tool_name:
+          type: string
+          example: Digital Caliper Pro
+        tool_model:
+          type: string
+          example: MITUTOYO-CD-15CPX
+        imei:
+          type: string
+          example: IME-001-2024
+        tool_type:
+          type: string
+          enum: [OPTICAL, MECHANICAL]
+          example: OPTICAL
+        status:
+          type: string
+          enum: [ACTIVE, INACTIVE]
+          example: ACTIVE
+        calibration_date:
+          type: string
+          format: date
+          example: '2024-01-15'
+        next_calibration_date:
+          type: string
+          format: date
+          example: '2025-01-15'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateToolRequest:
+      type: object
+      required:
+        - tool_name
+        - tool_model
+        - imei
+        - tool_type
+        - calibration_date
+      properties:
+        tool_name:
+          type: string
+          example: Digital Caliper Pro
+        tool_model:
+          type: string
+          example: MITUTOYO-CD-15CPX
+        imei:
+          type: string
+          example: IME-001-2024
+        tool_type:
+          type: string
+          enum: [OPTICAL, MECHANICAL]
+          example: OPTICAL
+        status:
+          type: string
+          enum: [ACTIVE, INACTIVE]
+          default: ACTIVE
+        calibration_date:
+          type: string
+          format: date
+          example: '2024-01-15'
+
+    # Issue Schemas
+    Issue:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        issue_name:
+          type: string
+          example: Calibration Overdue
+        description:
+          type: string
+          example: Multiple instruments require calibration
+        status:
+          type: string
+          enum: [PENDING, ON_GOING, SOLVED]
+          example: PENDING
+        due_date:
+          type: string
+          format: date
+          example: '2024-12-31'
+        created_by:
+          type: integer
+          example: 1
+        comments_count:
+          type: integer
+          example: 5
+        creator:
+          type: object
+          properties:
+            id:
+              type: integer
+            username:
+              type: string
+            employee_id:
+              type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateIssueRequest:
+      type: object
+      required:
+        - issue_name
+        - description
+        - due_date
+      properties:
+        issue_name:
+          type: string
+          example: Calibration Overdue
+        description:
+          type: string
+          example: Multiple instruments require calibration
+        status:
+          type: string
+          enum: [PENDING, ON_GOING, SOLVED]
+          default: PENDING
+        due_date:
+          type: string
+          format: date
+          example: '2024-12-31'
+
+    IssueComment:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        issue_id:
+          type: integer
+          example: 1
+        comment:
+          type: string
+          example: Working on this issue
+        user:
+          type: object
+          properties:
+            id:
+              type: integer
+            username:
+              type: string
+            employee_id:
+              type: string
+        created_at:
+          type: string
+          format: date-time
+
+    CreateCommentRequest:
+      type: object
+      required:
+        - comment
+      properties:
+        comment:
+          type: string
+          example: Working on this issue
+
+    # Product Measurement Schemas
+    ProductMeasurement:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        product_id:
+          type: integer
+          example: 1
+        measurement_type:
+          type: string
+          enum: [FULL_MEASUREMENT, SCALE_MEASUREMENT]
+          example: FULL_MEASUREMENT
+        due_date:
+          type: string
+          format: date
+          example: '2024-12-31'
+        status:
+          type: string
+          example: NOT_STARTED
+        batch_number:
+          type: string
+          nullable: true
+        measurement_results:
+          type: array
+          items:
+            type: object
+        product:
+          $ref: '#/components/schemas/Product'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateProductMeasurementRequest:
+      type: object
+      required:
+        - product_id
+        - measurement_type
+        - due_date
+      properties:
+        product_id:
+          type: integer
+          example: 1
+        measurement_type:
+          type: string
+          enum: [FULL_MEASUREMENT, SCALE_MEASUREMENT]
+          example: FULL_MEASUREMENT
+        due_date:
+          type: string
+          format: date
+          example: '2024-12-31'
+
+paths:
+  # Authentication Endpoints
+  /v1/login:
+    post:
+      tags:
+        - Authentication
+      summary: User login
+      description: Authenticate user and get JWT token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+              example:
+                http_code: 200
+                message: Login berhasil
+                error_id: null
+                data:
+                  token: eyJ0eXAiOiJKV1QiLCJhbGc...
+                  user:
+                    id: 1
+                    username: admin
+                    role: admin
+                    employee_id: EMP-001
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/logout:
+    post:
+      tags:
+        - Authentication
+      summary: User logout
+      description: Invalidate current JWT token
+      responses:
+        '200':
+          description: Logout successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /v1/refresh:
+    post:
+      tags:
+        - Authentication
+      summary: Refresh JWT token
+      description: Get a new JWT token using current token
+      responses:
+        '200':
+          description: Token refreshed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  http_code:
+                    type: integer
+                    example: 200
+                  message:
+                    type: string
+                    example: Token refreshed successfully
+                  error_id:
+                    type: string
+                    nullable: true
+                  data:
+                    type: object
+                    properties:
+                      token:
+                        type: string
+
+  /v1/me:
+    get:
+      tags:
+        - Authentication
+      summary: Get current user
+      description: Get authenticated user information
+      responses:
+        '200':
+          description: User information retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  http_code:
+                    type: integer
+                  message:
+                    type: string
+                  error_id:
+                    type: string
+                    nullable: true
+                  data:
+                    $ref: '#/components/schemas/User'
+
+  /v1/change-password:
+    post:
+      tags:
+        - Authentication
+      summary: Change password
+      description: Change user password (or admin reset for other users)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangePasswordRequest'
+      responses:
+        '200':
+          description: Password changed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /v1/update-user:
+    put:
+      tags:
+        - Authentication
+      summary: Update user information
+      description: Update current user information
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                phone:
+                  type: string
+                email:
+                  type: string
+                position:
+                  type: string
+                department:
+                  type: string
+                photo_url:
+                  type: string
+      responses:
+        '200':
+          description: User updated successfully
+
+  /v1/create-user:
+    post:
+      tags:
+        - Authentication
+      summary: Create new user (SuperAdmin only)
+      description: Create a new user account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserRequest'
+      responses:
+        '201':
+          description: User created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  http_code:
+                    type: integer
+                    example: 201
+                  message:
+                    type: string
+                  data:
+                    $ref: '#/components/schemas/User'
+
+  /v1/get-user-list:
+    get:
+      tags:
+        - Authentication
+      summary: Get user list (SuperAdmin only)
+      description: Get list of all users with pagination
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Users retrieved successfully
+
+  /v1/delete-users:
+    delete:
+      tags:
+        - Authentication
+      summary: Delete users (SuperAdmin only)
+      description: Delete one or multiple users
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - user_ids
+              properties:
+                user_ids:
+                  type: array
+                  items:
+                    type: integer
+                  example: [2, 3, 4]
+      responses:
+        '200':
+          description: Users deleted successfully
+
+  # Product Endpoints
+  /v1/products:
+    post:
+      tags:
+        - Products
+      summary: Create new product (Admin/SuperAdmin only)
+      description: Create a new product with measurement points
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProductRequest'
+      responses:
+        '201':
+          description: Product created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  http_code:
+                    type: integer
+                    example: 201
+                  message:
+                    type: string
+                    example: Product berhasil dibuat
+                  data:
+                    $ref: '#/components/schemas/Product'
+        '400':
+          description: Validation error or no active quarter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    get:
+      tags:
+        - Products
+      summary: Get products list (Admin/SuperAdmin only)
+      description: Get paginated list of products with optional filters
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+          description: Page number
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+          description: Items per page
+        - name: product_category_id
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Filter by product category ID (optional)
+        - name: search
+          in: query
+          schema:
+            type: string
+          description: Search by product name
+      responses:
+        '200':
+          description: Products retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  http_code:
+                    type: integer
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      products:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Product'
+                      pagination:
+                        type: object
+
+  /v1/products/{productId}:
+    get:
+      tags:
+        - Products
+      summary: Get product by ID (Admin/SuperAdmin only)
+      description: Get detailed product information
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Product retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  http_code:
+                    type: integer
+                  message:
+                    type: string
+                  data:
+                    $ref: '#/components/schemas/Product'
+
+    put:
+      tags:
+        - Products
+      summary: Update product (Admin/SuperAdmin only)
+      description: Update an existing product with partial update support
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Product ID to update
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                basic_info:
+                  type: object
+                  properties:
+                    product_category_id:
+                      type: integer
+                    product_name:
+                      type: string
+                    ref_spec_number:
+                      type: string
+                      nullable: true
+                    nom_size_vo:
+                      type: string
+                      nullable: true
+                    article_code:
+                      type: string
+                      nullable: true
+                    no_document:
+                      type: string
+                      nullable: true
+                    no_doc_reference:
+                      type: string
+                      nullable: true
+                    color:
+                      type: string
+                      nullable: true
+                    size:
+                      type: string
+                      nullable: true
+                measurement_points:
+                  type: array
+                  description: Optional - update measurement points
+                measurement_groups:
+                  type: array
+                  description: Optional - update measurement groups
+      responses:
+        '200':
+          description: Product updated successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  http_code:
+                    type: integer
+                  message:
+                    type: string
+                  data:
+                    $ref: '#/components/schemas/Product'
+        '404':
+          description: Product not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    delete:
+      tags:
+        - Products
+      summary: Delete product (Admin/SuperAdmin only)
+      description: Delete a product (only if it has no measurement data)
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Product ID to delete
+      responses:
+        '200':
+          description: Product deleted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  http_code:
+                    type: integer
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      deleted:
+                        type: boolean
+        '400':
+          description: Product has measurements and cannot be deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Product not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /v1/products/is-product-exists:
+    get:
+      tags:
+        - Products
+      summary: Check if product exists (Admin/SuperAdmin only)
+      description: |
+        Check if a product with same basic info already exists.
+        All fields are compared - a product is considered the same if ALL field values match (including null values).
+      parameters:
+        - name: product_category_id
+          in: query
+          required: true
+          schema:
+            type: integer
+          description: Product category ID
+        - name: product_name
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Product name
+        - name: ref_spec_number
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Reference specification number (nullable)
+        - name: nom_size_vo
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Nominal size VO (nullable)
+        - name: article_code
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Article code (nullable)
+        - name: no_document
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Document number (nullable)
+        - name: no_doc_reference
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Document reference number (nullable)
+        - name: color
+          in: query
+          required: false
+          schema:
+            type: string
+            pattern: '^#?[0-9A-Fa-f]{6}$'
+          description: Product color in HEX format (nullable)
+        - name: size
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Product size (nullable)
+      responses:
+        '200':
+          description: Check completed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  http_code:
+                    type: integer
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      exists:
+                        type: boolean
+
+  /v1/products/categories:
+    get:
+      tags:
+        - Products
+      summary: Get product categories (Admin/SuperAdmin only)
+      description: Get list of all product categories
+      responses:
+        '200':
+          description: Categories retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  http_code:
+                    type: integer
+                  message:
+                    type: string
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ProductCategory'
+
+  /v1/products/{productId}/measurement-items/suggest:
+    get:
+      tags:
+        - Products
+      summary: Get measurement item suggestions
+      description: Autocomplete endpoint for formula suggestions
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: query
+          in: query
+          schema:
+            type: string
+          description: Search query for autocomplete
+      responses:
+        '200':
+          description: Suggestions retrieved successfully
+
+  # Product Category Endpoints
+  /v1/product-categories:
+    get:
+      tags:
+        - Product Categories
+      summary: Get product categories
+      description: Get list of all product categories
+      responses:
+        '200':
+          description: Categories retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  http_code:
+                    type: integer
+                  message:
+                    type: string
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ProductCategory'
+
+  /v1/product-categories/search-products:
+    get:
+      tags:
+        - Product Categories
+      summary: Search products in categories
+      description: Search for products across categories
+      parameters:
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Search completed
+
+  /v1/product-categories/structure:
+    get:
+      tags:
+        - Product Categories
+      summary: Get category structure
+      description: Get hierarchical category structure
+      responses:
+        '200':
+          description: Structure retrieved
+
+  /v1/product-categories/{categoryId}/products:
+    get:
+      tags:
+        - Product Categories
+      summary: Get products by category
+      description: Get all products in a specific category
+      parameters:
+        - name: categoryId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Products retrieved
+
+  # Measurement Instrument Endpoints
+  /v1/measurement-instruments:
+    get:
+      tags:
+        - Measurement Instruments
+      summary: Get all measurement instruments
+      description: Get list of all measurement instruments
+      responses:
+        '200':
+          description: Instruments retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  http_code:
+                    type: integer
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      instruments:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/MeasurementInstrument'
+
+  /v1/measurement-instruments/{instrumentId}:
+    get:
+      tags:
+        - Measurement Instruments
+      summary: Get instrument by ID
+      description: Get detailed instrument information
+      parameters:
+        - name: instrumentId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Instrument retrieved successfully
+
+  # Tool Endpoints
+  /v1/tools:
+    get:
+      tags:
+        - Tools
+      summary: Get tools list
+      description: Get paginated list of tools
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [ACTIVE, INACTIVE]
+        - name: tool_model
+          in: query
+          schema:
+            type: string
+        - name: tool_type
+          in: query
+          schema:
+            type: string
+            enum: [OPTICAL, MECHANICAL]
+        - name: search
+          in: query
+          schema:
+            type: string
+          description: Search by tool_name, tool_model, or imei
+      responses:
+        '200':
+          description: Tools retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  http_code:
+                    type: integer
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      tools:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Tool'
+                      pagination:
+                        type: object
+
+    post:
+      tags:
+        - Tools
+      summary: Create new tool (Admin/SuperAdmin only)
+      description: Create a new tool/equipment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateToolRequest'
+      responses:
+        '201':
+          description: Tool created successfully
+
+  /v1/tools/models:
+    get:
+      tags:
+        - Tools
+      summary: Get tool models
+      description: Get list of unique tool models (ACTIVE tools only)
+      responses:
+        '200':
+          description: Models retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  http_code:
+                    type: integer
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      models:
+                        type: array
+                        items:
+                          type: string
+                        example: [MITUTOYO-CD-15CPX, BOSCH-GLM-50]
+
+  /v1/tools/by-model:
+    get:
+      tags:
+        - Tools
+      summary: Get tools by model
+      description: Get all tools with specific model (for IMEI selection)
+      parameters:
+        - name: tool_model
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Tools retrieved successfully
+
+  /v1/tools/{id}:
+    get:
+      tags:
+        - Tools
+      summary: Get tool by ID
+      description: Get detailed tool information
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Tool retrieved successfully
+
+    put:
+      tags:
+        - Tools
+      summary: Update tool (Admin/SuperAdmin only)
+      description: Update existing tool information
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateToolRequest'
+      responses:
+        '200':
+          description: Tool updated successfully
+
+    delete:
+      tags:
+        - Tools
+      summary: Delete tool (Admin/SuperAdmin only)
+      description: Delete a tool
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Tool deleted successfully
+
+  # Issue Endpoints
+  /v1/issues:
+    get:
+      tags:
+        - Issues
+      summary: Get issues list
+      description: Get paginated list of issues
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [PENDING, ON_GOING, SOLVED]
+        - name: search
+          in: query
+          schema:
+            type: string
+          description: Search by issue_name or description
+      responses:
+        '200':
+          description: Issues retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  http_code:
+                    type: integer
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      issues:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Issue'
+                      pagination:
+                        type: object
+
+    post:
+      tags:
+        - Issues
+      summary: Create new issue (Admin/SuperAdmin only)
+      description: Create a new issue
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateIssueRequest'
+      responses:
+        '201':
+          description: Issue created successfully
+
+  /v1/issues/{id}:
+    get:
+      tags:
+        - Issues
+      summary: Get issue by ID
+      description: Get detailed issue information with comments
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Issue retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  http_code:
+                    type: integer
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      issue:
+                        $ref: '#/components/schemas/Issue'
+                      comments:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/IssueComment'
+
+    put:
+      tags:
+        - Issues
+      summary: Update issue (Admin/SuperAdmin only)
+      description: Update existing issue
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateIssueRequest'
+      responses:
+        '200':
+          description: Issue updated successfully
+
+    delete:
+      tags:
+        - Issues
+      summary: Delete issue (Admin/SuperAdmin only)
+      description: Delete an issue
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Issue deleted successfully
+
+  /v1/issues/{id}/comments:
+    get:
+      tags:
+        - Issues
+      summary: Get issue comments
+      description: Get all comments for an issue
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Comments retrieved successfully
+
+    post:
+      tags:
+        - Issues
+      summary: Add comment to issue
+      description: Add a comment to an issue (all authenticated users)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCommentRequest'
+      responses:
+        '201':
+          description: Comment added successfully
+
+  /v1/issues/{issueId}/comments/{commentId}:
+    delete:
+      tags:
+        - Issues
+      summary: Delete comment
+      description: Delete a comment (only comment owner, admin, or superadmin)
+      parameters:
+        - name: issueId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: commentId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Comment deleted successfully
+
+  # Product Measurement Endpoints
+  /v1/product-measurement/available-products:
+    get:
+      tags:
+        - Product Measurements
+      summary: Get available products for monthly target
+      description: Get products that don't have measurement target in the specified quarter/year
+      parameters:
+        - name: quarter
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 4
+          description: Quarter number (1-4)
+        - name: year
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 2020
+            maximum: 2100
+          description: Year
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+          description: Page number
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+          description: Items per page
+      responses:
+        '200':
+          description: Available products retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  http_code:
+                    type: integer
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      docs:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Product'
+                      metadata:
+                        type: object
+                        properties:
+                          current_page:
+                            type: integer
+                          total_page:
+                            type: integer
+                          limit:
+                            type: integer
+                          total_docs:
+                            type: integer
+
+  /v1/product-measurement:
+    get:
+      tags:
+        - Product Measurements
+      summary: Get product measurements list
+      description: Get paginated list of product measurements with optional filters
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+          description: Page number
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+          description: Items per page
+        - name: quarter
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 4
+          description: Filter by quarter number (1-4)
+        - name: year
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 2020
+            maximum: 2100
+          description: Filter by year
+        - name: product_id
+          in: query
+          schema:
+            type: integer
+          description: Filter by product ID
+        - name: product_category_id
+          in: query
+          schema:
+            type: integer
+          description: Filter by product category ID
+        - name: measurement_type
+          in: query
+          schema:
+            type: string
+            enum: [FULL_MEASUREMENT, SCALE_MEASUREMENT]
+          description: Filter by measurement type
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [TODO, ONGOING, NEED_TO_MEASURE, OK, NG, NOT_COMPLETE]
+          description: Filter by status
+        - name: query
+          in: query
+          schema:
+            type: string
+          description: Search by product name, article code, etc.
+      responses:
+        '200':
+          description: Measurements retrieved successfully
+
+    post:
+      tags:
+        - Product Measurements
+      summary: Create new measurement
+      description: Create a new measurement entry for a product
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProductMeasurementRequest'
+      responses:
+        '201':
+          description: Measurement created successfully
+
+  /v1/product-measurement/bulk:
+    post:
+      tags:
+        - Product Measurements
+      summary: Bulk create measurements
+      description: Create measurements for multiple products
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - measurements
+              properties:
+                measurements:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/CreateProductMeasurementRequest'
+      responses:
+        '201':
+          description: Bulk measurements created successfully
+
+  /v1/product-measurement/{productMeasurementId}:
+    get:
+      tags:
+        - Product Measurements
+      summary: Get measurement by ID
+      description: Get detailed measurement information
+      parameters:
+        - name: productMeasurementId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Measurement retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  http_code:
+                    type: integer
+                  message:
+                    type: string
+                  data:
+                    $ref: '#/components/schemas/ProductMeasurement'
+
+  /v1/product-measurement/{productMeasurementId}/set-batch-number:
+    post:
+      tags:
+        - Product Measurements
+      summary: Set batch number
+      description: Set batch number and move status to IN_PROGRESS
+      parameters:
+        - name: productMeasurementId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - batch_number
+              properties:
+                batch_number:
+                  type: string
+                  example: BATCH-2024-001
+      responses:
+        '200':
+          description: Batch number set successfully
+
+  /v1/product-measurement/{productMeasurementId}/samples/check:
+    post:
+      tags:
+        - Product Measurements
+      summary: Check samples
+      description: Validate and evaluate samples for a specific measurement item
+      parameters:
+        - name: productMeasurementId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                measurement_item_name_id:
+                  type: string
+                samples:
+                  type: array
+                  items:
+                    type: object
+      responses:
+        '200':
+          description: Samples checked successfully
+
+  /v1/product-measurement/{productMeasurementId}/save-progress:
+    post:
+      tags:
+        - Product Measurements
+      summary: Save progress
+      description: Save measurement progress (partial save)
+      parameters:
+        - name: productMeasurementId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                measurement_results:
+                  type: array
+                  items:
+                    type: object
+      responses:
+        '200':
+          description: Progress saved successfully
+
+  /v1/product-measurement/{productMeasurementId}/submit:
+    post:
+      tags:
+        - Product Measurements
+      summary: Submit measurement
+      description: Submit final measurement results
+      parameters:
+        - name: productMeasurementId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                measurement_results:
+                  type: array
+                  items:
+                    type: object
+      responses:
+        '200':
+          description: Measurement submitted successfully
+
+  /v1/product-measurement/{productMeasurementId}/create-sample-product:
+    post:
+      tags:
+        - Product Measurements
+      summary: Create sample product
+      description: Create a sample product from measurement results
+      parameters:
+        - name: productMeasurementId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '201':
+          description: Sample product created successfully
+
+  # Measurement Endpoints (Legacy/Demo)
+  /v1/measurements:
+    post:
+      tags:
+        - Measurements
+      summary: Store measurement data
+      description: Store measurement data (legacy endpoint)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '201':
+          description: Measurement stored successfully
+
+  /v1/measurements/{id}:
+    get:
+      tags:
+        - Measurements
+      summary: Get measurement with calculated result
+      description: Get measurement with formula calculations
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Measurement retrieved successfully
+
+  /v1/measurements/{id}/process-formula:
+    post:
+      tags:
+        - Measurements
+      summary: Process formula
+      description: Calculate formula result for measurement
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                formula:
+                  type: string
+                  example: '=avg(thickness_a)'
+      responses:
+        '200':
+          description: Formula processed successfully

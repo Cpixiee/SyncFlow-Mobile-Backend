@@ -293,9 +293,16 @@ class ProductController extends Controller
         try {
             $page = $request->input('page', 1);
             $limit = $request->input('limit', 10);
+            $productCategoryId = $request->input('product_category_id');
 
-            $products = Product::with(['quarter', 'productCategory'])
-                ->paginate($limit, ['*'], 'page', $page);
+            $query = Product::with(['quarter', 'productCategory']);
+
+            // Filter by product_category_id if provided
+            if ($productCategoryId) {
+                $query->where('product_category_id', $productCategoryId);
+            }
+
+            $products = $query->paginate($limit, ['*'], 'page', $page);
 
             $transformedProducts = collect($products->items())
                 ->map(function ($product) {
@@ -372,6 +379,216 @@ class ProductController extends Controller
             return $this->successResponse($categories);
         } catch (\Exception $e) {
             return $this->errorResponse('Error: ' . $e->getMessage(), 'FETCH_ERROR', 500);
+        }
+    }
+
+    /**
+     * Delete product
+     */
+    public function destroy(string $productId)
+    {
+        try {
+            $product = Product::where('product_id', $productId)->first();
+
+            if (!$product) {
+                return $this->notFoundResponse('Product tidak ditemukan');
+            }
+
+            // Check if product has any product measurements
+            $hasMeasurements = $product->productMeasurements()->exists();
+            if ($hasMeasurements) {
+                return $this->errorResponse(
+                    'Product tidak dapat dihapus karena sudah memiliki measurement data',
+                    'PRODUCT_HAS_MEASUREMENTS',
+                    400
+                );
+            }
+
+            $product->delete();
+
+            return $this->successResponse(
+                ['deleted' => true],
+                'Product berhasil dihapus'
+            );
+
+        } catch (\Exception $e) {
+            return $this->errorResponse('Error: ' . $e->getMessage(), 'DELETE_ERROR', 500);
+        }
+    }
+
+    /**
+     * Update product
+     */
+    public function update(Request $request, string $productId)
+    {
+        try {
+            $product = Product::where('product_id', $productId)->first();
+
+            if (!$product) {
+                return $this->notFoundResponse('Product tidak ditemukan');
+            }
+
+            // Validate request
+            $validator = Validator::make($request->all(), [
+                // Basic Info - hanya yang dikirim yang akan diupdate
+                'basic_info.product_category_id' => 'nullable|integer|exists:product_categories,id',
+                'basic_info.product_name' => 'nullable|string',
+                'basic_info.ref_spec_number' => 'nullable|string',
+                'basic_info.nom_size_vo' => 'nullable|string',
+                'basic_info.article_code' => 'nullable|string',
+                'basic_info.no_document' => 'nullable|string',
+                'basic_info.no_doc_reference' => 'nullable|string',
+                'basic_info.color' => 'nullable|string|regex:/^#?[0-9A-Fa-f]{6}$/',
+                'basic_info.size' => 'nullable|string',
+
+                // Measurement Points - optional untuk update
+                'measurement_points' => 'nullable|array',
+                'measurement_points.*.setup.name' => 'required_with:measurement_points|string',
+                'measurement_points.*.setup.name_id' => 'required_with:measurement_points|string|regex:/^[a-zA-Z_]+$/',
+                'measurement_points.*.setup.sample_amount' => 'required_with:measurement_points|integer|min:1',
+                'measurement_points.*.setup.nature' => 'required_with:measurement_points|in:QUALITATIVE,QUANTITATIVE',
+                'measurement_points.*.setup.source' => 'nullable|in:MANUAL,DERIVED,TOOL',
+                'measurement_points.*.setup.source_derived_name_id' => 'required_if:measurement_points.*.setup.source,DERIVED|nullable|string',
+                'measurement_points.*.setup.source_tool_model' => 'required_if:measurement_points.*.setup.source,TOOL|nullable|string',
+                'measurement_points.*.setup.type' => 'nullable|in:SINGLE,BEFORE_AFTER',
+                'measurement_points.*.variables' => 'nullable|array',
+                'measurement_points.*.variables.*.type' => 'required_with:measurement_points.*.variables|in:FIXED,MANUAL,FORMULA',
+                'measurement_points.*.variables.*.name' => 'required_with:measurement_points.*.variables|string|regex:/^[a-zA-Z_][a-zA-Z0-9_]*$/',
+                'measurement_points.*.variables.*.value' => 'required_if:measurement_points.*.variables.*.type,FIXED|nullable|numeric',
+                'measurement_points.*.variables.*.formula' => 'required_if:measurement_points.*.variables.*.type,FORMULA|nullable|string',
+                'measurement_points.*.variables.*.is_show' => 'required_with:measurement_points.*.variables|boolean',
+                'measurement_points.*.pre_processing_formulas' => 'nullable|array',
+                'measurement_points.*.pre_processing_formulas.*.name' => 'required_with:measurement_points.*.pre_processing_formulas|string|regex:/^[a-zA-Z_][a-zA-Z0-9_]*$/',
+                'measurement_points.*.pre_processing_formulas.*.formula' => 'required_with:measurement_points.*.pre_processing_formulas|string',
+                'measurement_points.*.pre_processing_formulas.*.is_show' => 'required_with:measurement_points.*.pre_processing_formulas|boolean',
+                'measurement_points.*.evaluation_type' => 'required_with:measurement_points|in:PER_SAMPLE,JOINT,SKIP_CHECK',
+                'measurement_points.*.evaluation_setting' => 'required_with:measurement_points|array',
+                'measurement_points.*.rule_evaluation_setting' => 'nullable|array',
+                'measurement_points.*.rule_evaluation_setting.rule' => 'required_with:measurement_points.*.rule_evaluation_setting|in:MIN,MAX,BETWEEN',
+                'measurement_points.*.rule_evaluation_setting.unit' => 'required_with:measurement_points.*.rule_evaluation_setting|string',
+                'measurement_points.*.rule_evaluation_setting.value' => 'required_with:measurement_points.*.rule_evaluation_setting|numeric',
+                'measurement_points.*.rule_evaluation_setting.tolerance_minus' => 'required_if:measurement_points.*.rule_evaluation_setting.rule,BETWEEN|nullable|numeric',
+                'measurement_points.*.rule_evaluation_setting.tolerance_plus' => 'required_if:measurement_points.*.rule_evaluation_setting.rule,BETWEEN|nullable|numeric',
+
+                // Measurement Groups
+                'measurement_groups' => 'nullable|array',
+                'measurement_groups.*.group_name' => 'required_with:measurement_groups|string',
+                'measurement_groups.*.measurement_items' => 'required_with:measurement_groups|array',
+                'measurement_groups.*.order' => 'required_with:measurement_groups|integer',
+            ]);
+
+            if ($validator->fails()) {
+                return $this->validationErrorResponse($validator->errors());
+            }
+
+            // Update basic info jika ada
+            if ($request->has('basic_info')) {
+                $basicInfo = $request->input('basic_info');
+                
+                // Validate product_category_id dan product_name jika diubah
+                if (isset($basicInfo['product_category_id'])) {
+                    $category = ProductCategory::find($basicInfo['product_category_id']);
+                    if (!$category) {
+                        return $this->errorResponse('Product category tidak ditemukan', 'CATEGORY_NOT_FOUND', 400);
+                    }
+                    $product->product_category_id = $basicInfo['product_category_id'];
+                }
+
+                if (isset($basicInfo['product_name'])) {
+                    // Validate product_name valid untuk category
+                    $category = $product->productCategory;
+                    if (isset($basicInfo['product_category_id'])) {
+                        $category = ProductCategory::find($basicInfo['product_category_id']);
+                    }
+                    
+                    if (!in_array($basicInfo['product_name'], $category->products)) {
+                        return $this->errorResponse(
+                            'Product name "' . $basicInfo['product_name'] . '" tidak valid untuk category "' . $category->name . '"',
+                            'INVALID_PRODUCT_NAME',
+                            400
+                        );
+                    }
+                    $product->product_name = $basicInfo['product_name'];
+                }
+
+                // Update other basic info fields
+                $optionalFields = ['ref_spec_number', 'nom_size_vo', 'article_code', 'no_document', 'no_doc_reference', 'color', 'size'];
+                foreach ($optionalFields as $field) {
+                    if (isset($basicInfo[$field])) {
+                        $product->$field = $basicInfo[$field];
+                    }
+                }
+            }
+
+            // Update measurement points jika ada
+            if ($request->has('measurement_points')) {
+                $measurementPoints = $request->input('measurement_points');
+                
+                // Auto-generate name_id if not provided
+                $measurementPoints = $this->autoGenerateNameIds($measurementPoints);
+
+                // Validate and process formulas
+                $formulaValidationErrors = $this->validateAndProcessFormulas($measurementPoints);
+                if (!empty($formulaValidationErrors)) {
+                    return $this->errorResponse('Formula validation failed', 'FORMULA_VALIDATION_ERROR', 400, $formulaValidationErrors);
+                }
+
+                // Additional validation for measurement points
+                $validationErrors = $this->validateMeasurementPoints($measurementPoints);
+                if (!empty($validationErrors)) {
+                    return $this->errorResponse('Measurement points validation failed', 'MEASUREMENT_VALIDATION_ERROR', 400, $validationErrors);
+                }
+
+                // Validate source and type are required for QUANTITATIVE
+                $quantitativeErrors = $this->validateQuantitativeRequirements($measurementPoints);
+                if (!empty($quantitativeErrors)) {
+                    return $this->errorResponse('QUANTITATIVE measurement validation failed', 'QUANTITATIVE_VALIDATION_ERROR', 400, $quantitativeErrors);
+                }
+
+                // Validate type-specific rules
+                $typeSpecificErrors = $this->validateTypeSpecificRules($measurementPoints);
+                if (!empty($typeSpecificErrors)) {
+                    return $this->errorResponse('Type-specific validation failed', 'TYPE_VALIDATION_ERROR', 400, $typeSpecificErrors);
+                }
+
+                // Validate name uniqueness
+                $nameValidationErrors = $this->validateNameUniqueness($measurementPoints);
+                if (!empty($nameValidationErrors)) {
+                    return $this->errorResponse('Name validation failed', 'NAME_UNIQUENESS_ERROR', 400, $nameValidationErrors);
+                }
+
+                // Process measurement groups if provided
+                $measurementGroups = $request->input('measurement_groups', []);
+                $processedMeasurementPoints = $this->processMeasurementGrouping($measurementPoints, $measurementGroups);
+
+                $product->measurement_points = $processedMeasurementPoints;
+                
+                if ($request->has('measurement_groups')) {
+                    $product->measurement_groups = $measurementGroups;
+                }
+            }
+
+            $product->save();
+
+            return $this->successResponse([
+                'product_id' => $product->product_id,
+                'basic_info' => [
+                    'product_category_id' => $product->product_category_id,
+                    'product_name' => $product->product_name,
+                    'ref_spec_number' => $product->ref_spec_number,
+                    'nom_size_vo' => $product->nom_size_vo,
+                    'article_code' => $product->article_code,
+                    'no_document' => $product->no_document,
+                    'no_doc_reference' => $product->no_doc_reference,
+                    'color' => $product->color,
+                    'size' => $product->size,
+                ],
+                'measurement_points' => $product->measurement_points,
+                'measurement_groups' => $product->measurement_groups,
+            ], 'Product berhasil diupdate');
+
+        } catch (\Exception $e) {
+            return $this->errorResponse('Error: ' . $e->getMessage(), 'UPDATE_ERROR', 500);
         }
     }
 

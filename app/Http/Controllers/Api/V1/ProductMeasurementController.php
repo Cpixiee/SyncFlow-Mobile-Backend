@@ -17,6 +17,91 @@ class ProductMeasurementController extends Controller
     use ApiResponseTrait;
 
     /**
+     * Get available products for creating new monthly target
+     * Returns list of products yang belum punya target di quarter yang dipilih
+     */
+    public function getAvailableProducts(Request $request)
+    {
+        try {
+            // Validate query parameters
+            $validator = Validator::make($request->all(), [
+                'quarter' => 'required|integer|min:1|max:4',
+                'year' => 'required|integer|min:2020|max:2100',
+                'page' => 'nullable|integer|min:1',
+                'limit' => 'nullable|integer|min:1|max:100',
+            ]);
+
+            if ($validator->fails()) {
+                return $this->validationErrorResponse(
+                    $validator->errors(),
+                    'Request invalid'
+                );
+            }
+
+            $quarter = $request->get('quarter');
+            $year = $request->get('year');
+            $page = $request->get('page', 1);
+            $limit = $request->get('limit', 10);
+
+            // Get quarter range
+            $quarterRange = $this->getQuarterRangeFromQuarterNumber($quarter, $year);
+
+            // Get all products
+            $allProductsQuery = Product::with(['quarter', 'productCategory']);
+
+            // Get products yang sudah punya measurement di quarter ini
+            $productsWithMeasurement = ProductMeasurement::whereBetween('measured_at', [$quarterRange['start'], $quarterRange['end']])
+                ->pluck('product_id')
+                ->unique()
+                ->toArray();
+
+            // Filter products yang belum punya measurement di quarter ini
+            if (!empty($productsWithMeasurement)) {
+                $allProductsQuery->whereNotIn('id', $productsWithMeasurement);
+            }
+
+            // Paginate results
+            $products = $allProductsQuery->paginate($limit, ['*'], 'page', $page);
+
+            // Transform products to match GET /products response format
+            $transformedProducts = collect($products->items())
+                ->map(function ($product) {
+                    return [
+                        'id' => $product->product_id,
+                        'product_category_id' => $product->product_category_id,
+                        'product_category_name' => $product->productCategory->name,
+                        'product_name' => $product->product_name,
+                        'ref_spec_number' => $product->ref_spec_number,
+                        'nom_size_vo' => $product->nom_size_vo,
+                        'article_code' => $product->article_code,
+                        'no_document' => $product->no_document,
+                        'no_doc_reference' => $product->no_doc_reference,
+                        'color' => $product->color,
+                        'size' => $product->size,
+                    ];
+                })->values()->all();
+
+            return $this->paginationResponse(
+                $transformedProducts,
+                [
+                    'current_page' => $products->currentPage(),
+                    'total_page' => $products->lastPage(),
+                    'limit' => $products->perPage(),
+                    'total_docs' => $products->total(),
+                ],
+                'Available products retrieved successfully'
+            );
+
+        } catch (\Exception $e) {
+            return $this->errorResponse(
+                'Could not retrieve available products: ' . $e->getMessage(),
+                'AVAILABLE_PRODUCTS_FETCH_ERROR',
+                500
+            );
+        }
+    }
+
+    /**
      * Get product measurements list for Monthly Target page
      */
     public function index(Request $request)
@@ -39,6 +124,8 @@ class ProductMeasurementController extends Controller
                 'limit' => 'nullable|integer|min:1|max:100',
                 'product_category_id' => 'nullable|integer|exists:product_categories,id',
                 'query' => 'nullable|string|max:255',
+                'quarter' => 'nullable|integer|min:1|max:4',
+                'year' => 'nullable|integer|min:2020|max:2100',
             ]);
 
             if ($validator->fails()) {
@@ -56,6 +143,8 @@ class ProductMeasurementController extends Controller
             $status = $request->get('status');
             $productCategoryId = $request->get('product_category_id');
             $query = $request->get('query');
+            $quarter = $request->get('quarter');
+            $year = $request->get('year');
 
             // Build base query with ProductMeasurement join
             $productsQuery = Product::with(['productCategory', 'quarter'])
@@ -68,7 +157,11 @@ class ProductMeasurementController extends Controller
                 $productsQuery->where('product_measurements.measurement_type', $measurementType);
             }
 
-            if ($startDate && $endDate) {
+            // Filter by quarter and year if provided
+            if ($quarter && $year) {
+                $quarterRange = $this->getQuarterRangeFromQuarterNumber($quarter, $year);
+                $productsQuery->whereBetween('product_measurements.measured_at', [$quarterRange['start'], $quarterRange['end']]);
+            } elseif ($startDate && $endDate) {
                 $productsQuery->whereBetween('product_measurements.measured_at', [$startDate, $endDate]);
             }
 
@@ -99,7 +192,11 @@ class ProductMeasurementController extends Controller
                     $measurementQuery->where('measurement_type', $measurementType);
                 }
                 
-                if ($startDate && $endDate) {
+                // Filter by quarter and year if provided
+                if ($quarter && $year) {
+                    $quarterRange = $this->getQuarterRangeFromQuarterNumber($quarter, $year);
+                    $measurementQuery->whereBetween('measured_at', [$quarterRange['start'], $quarterRange['end']]);
+                } elseif ($startDate && $endDate) {
                     $measurementQuery->whereBetween('measured_at', [$startDate, $endDate]);
                 }
                 
@@ -1161,6 +1258,53 @@ class ProductMeasurementController extends Controller
                 ->whereBetween('measured_at', [$dayStart, $dayEnd])
                 ->exists();
         }
+    }
+
+    /**
+     * Get quarter range based on quarter number (1-4) and year
+     */
+    private function getQuarterRangeFromQuarterNumber(int $quarter, int $year): array
+    {
+        // Quarter ranges:
+        // Q1: Juni-Juli-Agustus (06-07-08)
+        // Q2: September-Oktober-November (09-10-11)
+        // Q3: Desember-Januari-Februari (12-01-02)
+        // Q4: Maret-April-Mei (03-04-05)
+        
+        switch ($quarter) {
+            case 1:
+                $startDate = $year . '-06-01 00:00:00';
+                $endDate = $year . '-08-31 23:59:59';
+                break;
+            case 2:
+                $startDate = $year . '-09-01 00:00:00';
+                $endDate = $year . '-11-30 23:59:59';
+                break;
+            case 3:
+                // Q3 crosses year boundary: Dec-Jan-Feb
+                $startDate = $year . '-12-01 00:00:00';
+                $endDate = ($year + 1) . '-02-28 23:59:59';
+                // Check for leap year
+                if (date('L', strtotime($year + 1 . '-01-01'))) {
+                    $endDate = ($year + 1) . '-02-29 23:59:59';
+                }
+                break;
+            case 4:
+                $startDate = $year . '-03-01 00:00:00';
+                $endDate = $year . '-05-31 23:59:59';
+                break;
+            default:
+                // Fallback to Q1
+                $startDate = $year . '-06-01 00:00:00';
+                $endDate = $year . '-08-31 23:59:59';
+                break;
+        }
+        
+        return [
+            'start' => $startDate,
+            'end' => $endDate,
+            'quarter' => 'Q' . $quarter
+        ];
     }
 
     /**

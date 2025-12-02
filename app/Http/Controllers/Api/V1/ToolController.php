@@ -75,8 +75,8 @@ class ToolController extends Controller
                         'tool_model' => $tool->tool_model,
                         'tool_type' => $tool->tool_type->value,
                         'tool_type_description' => $tool->tool_type->getDescription(),
-                        'last_calibration' => $tool->last_calibration?->format('Y-m-d'),
-                        'next_calibration' => $tool->next_calibration?->format('Y-m-d'),
+                        'last_calibration_at' => $tool->last_calibration_at?->format('Y-m-d'),
+                        'next_calibration_at' => $tool->next_calibration_at?->format('Y-m-d'),
                         'imei' => $tool->imei,
                         'status' => $tool->status->value,
                         'status_description' => $tool->status->getDescription(),
@@ -124,8 +124,8 @@ class ToolController extends Controller
                     'tool_model' => $tool->tool_model,
                     'tool_type' => $tool->tool_type->value,
                     'tool_type_description' => $tool->tool_type->getDescription(),
-                    'last_calibration' => $tool->last_calibration?->format('Y-m-d'),
-                    'next_calibration' => $tool->next_calibration?->format('Y-m-d'),
+                    'last_calibration_at' => $tool->last_calibration_at?->format('Y-m-d'),
+                    'next_calibration_at' => $tool->next_calibration_at?->format('Y-m-d'),
                     'imei' => $tool->imei,
                     'status' => $tool->status->value,
                     'status_description' => $tool->status->getDescription(),
@@ -154,7 +154,7 @@ class ToolController extends Controller
                 'tool_name' => 'required|string|max:255',
                 'tool_model' => 'required|string|max:255',
                 'tool_type' => ['required', new Enum(ToolType::class)],
-                'last_calibration' => 'nullable|date',
+                'last_calibration_at' => 'nullable|date',
                 'imei' => 'required|string|max:255|unique:tools,imei',
                 'status' => ['nullable', new Enum(ToolStatus::class)],
             ]);
@@ -168,7 +168,7 @@ class ToolController extends Controller
                 'tool_name' => $request->input('tool_name'),
                 'tool_model' => $request->input('tool_model'),
                 'tool_type' => $request->input('tool_type'),
-                'last_calibration' => $request->input('last_calibration'),
+                'last_calibration_at' => $request->input('last_calibration_at'),
                 'imei' => $request->input('imei'),
                 'status' => $request->input('status', 'ACTIVE'),
             ]);
@@ -217,7 +217,7 @@ class ToolController extends Controller
                 'tool_name' => 'nullable|string|max:255',
                 'tool_model' => 'nullable|string|max:255',
                 'tool_type' => ['nullable', new Enum(ToolType::class)],
-                'last_calibration' => 'nullable|date',
+                'last_calibration_at' => 'nullable|date',
                 'imei' => 'nullable|string|max:255|unique:tools,imei,' . $id,
                 'status' => ['nullable', new Enum(ToolStatus::class)],
             ]);
@@ -236,9 +236,9 @@ class ToolController extends Controller
             if ($request->has('tool_type')) {
                 $tool->tool_type = $request->input('tool_type');
             }
-            if ($request->has('last_calibration')) {
-                $tool->last_calibration = $request->input('last_calibration');
-                // next_calibration akan otomatis terupdate oleh model boot method
+            if ($request->has('last_calibration_at')) {
+                $tool->last_calibration_at = $request->input('last_calibration_at');
+                // next_calibration_at akan otomatis terupdate oleh model boot method
             }
             if ($request->has('imei')) {
                 $tool->imei = $request->input('imei');
@@ -256,8 +256,8 @@ class ToolController extends Controller
                     'tool_model' => $tool->tool_model,
                     'tool_type' => $tool->tool_type->value,
                     'tool_type_description' => $tool->tool_type->getDescription(),
-                    'last_calibration' => $tool->last_calibration?->format('Y-m-d'),
-                    'next_calibration' => $tool->next_calibration?->format('Y-m-d'),
+                    'last_calibration_at' => $tool->last_calibration_at?->format('Y-m-d'),
+                    'next_calibration_at' => $tool->next_calibration_at?->format('Y-m-d'),
                     'imei' => $tool->imei,
                     'status' => $tool->status->value,
                     'status_description' => $tool->status->getDescription(),
@@ -372,8 +372,8 @@ class ToolController extends Controller
                             'id' => $tool->id,
                             'tool_name' => $tool->tool_name,
                             'imei' => $tool->imei,
-                            'last_calibration' => $tool->last_calibration?->format('Y-m-d'),
-                            'next_calibration' => $tool->next_calibration?->format('Y-m-d'),
+                            'last_calibration_at' => $tool->last_calibration_at?->format('Y-m-d'),
+                            'next_calibration_at' => $tool->next_calibration_at?->format('Y-m-d'),
                         ];
                     })->values()->all()
                 ],

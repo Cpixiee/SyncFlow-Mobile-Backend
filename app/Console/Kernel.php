@@ -12,7 +12,19 @@ class Kernel extends ConsoleKernel
      */
     protected function schedule(Schedule $schedule): void
     {
-        // $schedule->command('inspire')->hourly();
+        // Daily notifications check at 08:00 AM
+        $schedule->command('notifications:check-tool-calibration')
+            ->dailyAt('08:00')
+            ->timezone('Asia/Jakarta');
+        
+        $schedule->command('notifications:check-overdue-issues')
+            ->dailyAt('09:00')
+            ->timezone('Asia/Jakarta');
+        
+        // Weekly notifications check every Monday at 08:00 AM
+        $schedule->command('notifications:check-monthly-target')
+            ->weeklyOn(1, '08:00')
+            ->timezone('Asia/Jakarta');
     }
 
     /**

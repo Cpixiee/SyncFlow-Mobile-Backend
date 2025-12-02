@@ -15,8 +15,8 @@ class Tool extends Model
         'tool_name',
         'tool_model',
         'tool_type',
-        'last_calibration',
-        'next_calibration',
+        'last_calibration_at',
+        'next_calibration_at',
         'imei',
         'status'
     ];
@@ -24,29 +24,29 @@ class Tool extends Model
     protected $casts = [
         'tool_type' => ToolType::class,
         'status' => ToolStatus::class,
-        'last_calibration' => 'date',
-        'next_calibration' => 'date',
+        'last_calibration_at' => 'datetime',
+        'next_calibration_at' => 'datetime',
     ];
 
     /**
-     * Boot method untuk auto-update next_calibration
+     * Boot method untuk auto-update next_calibration_at
      */
     protected static function boot()
     {
         parent::boot();
 
-        // Auto update next_calibration saat updating
+        // Auto update next_calibration_at saat updating
         static::updating(function ($tool) {
-            // Jika last_calibration diubah, otomatis update next_calibration (1 tahun dari last_calibration)
-            if ($tool->isDirty('last_calibration') && $tool->last_calibration) {
-                $tool->next_calibration = $tool->last_calibration->copy()->addYear();
+            // Jika last_calibration_at diubah, otomatis update next_calibration_at (1 tahun dari last_calibration_at)
+            if ($tool->isDirty('last_calibration_at') && $tool->last_calibration_at) {
+                $tool->next_calibration_at = $tool->last_calibration_at->copy()->addYear();
             }
         });
 
-        // Set next_calibration saat creating
+        // Set next_calibration_at saat creating
         static::creating(function ($tool) {
-            if ($tool->last_calibration && !$tool->next_calibration) {
-                $tool->next_calibration = $tool->last_calibration->copy()->addYear();
+            if ($tool->last_calibration_at && !$tool->next_calibration_at) {
+                $tool->next_calibration_at = $tool->last_calibration_at->copy()->addYear();
             }
         });
     }

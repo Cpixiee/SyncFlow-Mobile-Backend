@@ -26,7 +26,7 @@ class ToolFactory extends Factory
             'tool_name' => $this->faker->randomElement(['Digital Caliper', 'Micrometer', 'Height Gauge', 'Optical Sensor', 'Laser Scanner']) . ' ' . $this->faker->numberBetween(1, 100),
             'tool_model' => $this->faker->randomElement(['Mitutoyo CD-6', 'Mahr Micromar 40 EWR', 'Keyence LK-G5001', 'Keyence LS-7000', 'Mitutoyo 293-340']),
             'tool_type' => $this->faker->randomElement([ToolType::OPTICAL, ToolType::MECHANICAL]),
-            'last_calibration' => $this->faker->optional(0.8)->dateTimeBetween('-6 months', 'now'),
+            'last_calibration_at' => $this->faker->optional(0.8)->dateTimeBetween('-6 months', 'now'),
             'imei' => strtoupper($this->faker->unique()->bothify('???-###-???')),
             'status' => ToolStatus::ACTIVE, // Default status is ACTIVE
         ];
@@ -78,7 +78,7 @@ class ToolFactory extends Factory
     public function withCalibration(): static
     {
         return $this->state(fn (array $attributes) => [
-            'last_calibration' => Carbon::now()->subMonths(rand(1, 6)),
+            'last_calibration_at' => Carbon::now()->subMonths(rand(1, 6)),
         ]);
     }
 }

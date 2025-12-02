@@ -14,7 +14,7 @@ use App\Http\Controllers\Api\V1\IssueController;
 Route::prefix('v1')->group(function () {
     // Public authentication routes
     Route::post('/login', [AuthController::class, 'login']);
-    
+
     // Protected routes - require JWT authentication
     Route::middleware('api.auth')->group(function () {
         Route::post('/logout', [AuthController::class, 'logout']);
@@ -22,7 +22,7 @@ Route::prefix('v1')->group(function () {
         Route::get('/me', [AuthController::class, 'me']);
         Route::post('/change-password', [AuthController::class, 'changePassword']);
         Route::put('/update-user', [AuthController::class, 'updateUser']);
-        
+
         // Measurement routes - available for authenticated users
         Route::prefix('measurements')->group(function () {
             Route::post('/', [MeasurementController::class, 'store']);
@@ -34,7 +34,7 @@ Route::prefix('v1')->group(function () {
         Route::prefix('products')->group(function () {
             // Autocomplete endpoint - available for all authenticated users
             Route::get('/{productId}/measurement-items/suggest', [ProductController::class, 'suggestMeasurementItems']);
-            
+
             // Admin and SuperAdmin only routes
             Route::middleware('role:admin,superadmin')->group(function () {
                 Route::post('/', [ProductController::class, 'store']);
@@ -42,11 +42,14 @@ Route::prefix('v1')->group(function () {
                 Route::get('/is-product-exists', [ProductController::class, 'checkProductExists']);
                 Route::get('/categories', [ProductController::class, 'getProductCategories']);
                 Route::get('/{productId}', [ProductController::class, 'show']);
+                Route::put('/{productId}', [ProductController::class, 'update']);
+                Route::delete('/{productId}', [ProductController::class, 'destroy']);
             });
         });
 
         // Product Measurement routes - available for authenticated users
         Route::prefix('product-measurement')->group(function () {
+            Route::get('/available-products', [ProductMeasurementController::class, 'getAvailableProducts']);
             Route::post('/', [ProductMeasurementController::class, 'store']);
             Route::post('/bulk', [ProductMeasurementController::class, 'bulkStore']);
             Route::post('/{productMeasurementId}/set-batch-number', [ProductMeasurementController::class, 'setBatchNumber']);
@@ -80,7 +83,7 @@ Route::prefix('v1')->group(function () {
             Route::get('/models', [ToolController::class, 'getModels']);
             Route::get('/by-model', [ToolController::class, 'getByModel']);
             Route::get('/{id}', [ToolController::class, 'show']);
-            
+
             // Admin and SuperAdmin can CRUD
             Route::middleware('role:admin,superadmin')->group(function () {
                 Route::post('/', [ToolController::class, 'store']);
@@ -94,11 +97,11 @@ Route::prefix('v1')->group(function () {
             Route::get('/', [IssueController::class, 'index']);
             Route::get('/{id}', [IssueController::class, 'show']);
             Route::get('/{id}/comments', [IssueController::class, 'getComments']);
-            
+
             // All authenticated users can comment
             Route::post('/{id}/comments', [IssueController::class, 'addComment']);
             Route::delete('/{issueId}/comments/{commentId}', [IssueController::class, 'deleteComment']);
-            
+
             // Admin and SuperAdmin can CRUD issues
             Route::middleware('role:admin,superadmin')->group(function () {
                 Route::post('/', [IssueController::class, 'store']);
@@ -112,6 +115,16 @@ Route::prefix('v1')->group(function () {
             Route::post('/create-user', [AuthController::class, 'createUser']);
             Route::get('/get-user-list', [AuthController::class, 'getUserList']);
             Route::delete('/delete-users', [AuthController::class, 'deleteUsers']);
+        });
+
+        // Notifications - available for all authenticated users
+        Route::prefix('notifications')->group(function () {
+            Route::get('/', [\App\Http\Controllers\Api\V1\NotificationController::class, 'index']);
+            Route::get('/unread-count', [\App\Http\Controllers\Api\V1\NotificationController::class, 'getUnreadCount']);
+            Route::post('/{id}/mark-as-read', [\App\Http\Controllers\Api\V1\NotificationController::class, 'markAsRead']);
+            Route::post('/mark-all-as-read', [\App\Http\Controllers\Api\V1\NotificationController::class, 'markAllAsRead']);
+            Route::delete('/{id}', [\App\Http\Controllers\Api\V1\NotificationController::class, 'destroy']);
+            Route::delete('/read/all', [\App\Http\Controllers\Api\V1\NotificationController::class, 'deleteAllRead']);
         });
     });
 });

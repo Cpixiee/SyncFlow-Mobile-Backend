@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Models\Issue;
 use App\Models\IssueComment;
+use App\Models\Notification;
+use App\Models\LoginUser;
 use App\Enums\IssueStatus;
 use App\Traits\ApiResponseTrait;
 use Illuminate\Http\Request;
@@ -43,9 +45,9 @@ class IssueController extends Controller
             // Search
             if ($request->has('search')) {
                 $search = $request->input('search');
-                $query->where(function($q) use ($search) {
+                $query->where(function ($q) use ($search) {
                     $q->where('issue_name', 'like', "%{$search}%")
-                      ->orWhere('description', 'like', "%{$search}%");
+                        ->orWhere('description', 'like', "%{$search}%");
                 });
             }
 
@@ -179,6 +181,12 @@ class IssueController extends Controller
             // Load creator relationship
             $issue->load('creator:id,username,role');
 
+            // Send notification for new issue
+            $this->sendNewIssueNotification($issue);
+
+            /** @var \Illuminate\Support\Carbon|null $dueDate */
+            $dueDate = $issue->due_date;
+
             return $this->successResponse(
                 [
                     'id' => $issue->id,
@@ -187,7 +195,7 @@ class IssueController extends Controller
                     'status' => $issue->status->value,
                     'status_description' => $issue->status->getDescription(),
                     'status_color' => $issue->status->getColor(),
-                    'due_date' => $issue->due_date?->format('Y-m-d'),
+                    'due_date' => $dueDate?->format('Y-m-d'),
                     'created_by' => [
                         'id' => $issue->creator->id,
                         'username' => $issue->creator->username,
@@ -251,6 +259,9 @@ class IssueController extends Controller
             // Load creator relationship
             $issue->load('creator:id,username,role');
 
+            /** @var \Illuminate\Support\Carbon|null $dueDate */
+            $dueDate = $issue->due_date;
+
             return $this->successResponse(
                 [
                     'id' => $issue->id,
@@ -259,7 +270,7 @@ class IssueController extends Controller
                     'status' => $issue->status->value,
                     'status_description' => $issue->status->getDescription(),
                     'status_color' => $issue->status->getColor(),
-                    'due_date' => $issue->due_date?->format('Y-m-d'),
+                    'due_date' => $dueDate?->format('Y-m-d'),
                     'created_by' => [
                         'id' => $issue->creator->id,
                         'username' => $issue->creator->username,
@@ -343,6 +354,9 @@ class IssueController extends Controller
 
             // Load user relationship
             $comment->load('user:id,username,role');
+
+            // Send notification to issue followers (NEW_COMMENT trigger)
+            $this->sendNewCommentNotification($comment, $issue, $user);
 
             return $this->successResponse(
                 [
@@ -447,6 +461,38 @@ class IssueController extends Controller
                 'COMMENT_DELETE_ERROR',
                 500
             );
+        }
+    }
+
+    /**
+     * Send notification when new issue is created
+     */
+    private function sendNewIssueNotification(Issue $issue): void
+    {
+        // Get ALL users (not just admin/superadmin)
+        $recipients = LoginUser::all();
+
+        foreach ($recipients as $user) {
+            // Don't send to the creator
+            if ($user->id !== $issue->created_by) {
+                Notification::createNewIssue($user->id, $issue);
+            }
+        }
+    }
+
+    /**
+     * Send notification when new comment is added
+     */
+    private function sendNewCommentNotification(IssueComment $comment, Issue $issue, $commenter): void
+    {
+        // Get ALL users (issue followers include everyone)
+        $followers = LoginUser::all();
+
+        // Send notification to all users except the commenter
+        foreach ($followers as $user) {
+            if ($user->id !== $commenter->id) {
+                Notification::createNewComment($user->id, $comment);
+            }
         }
     }
 }
