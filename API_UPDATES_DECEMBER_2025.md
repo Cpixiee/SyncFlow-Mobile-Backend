@@ -10,9 +10,10 @@ Dokumen ini berisi semua perbaikan dan penambahan endpoint API yang dilakukan pa
 1. 🐛 **Bug Fix**: Fixed `variable_values` field validation (`name_id` → `name`)
 2. 🐛 **Bug Fix**: Fixed `qualitative_value` type validation (boolean → string)
 3. 🐛 **Bug Fix**: Fixed "Undefined array key 'type'" error for QUALITATIVE measurements
-4. 📝 **Update**: Corrected payload examples dengan valid product names
-5. 📝 **Update**: Added valid product names list per category
-6. 📝 **Update**: Clarified `due_date` format requirements
+4. 🐛 **Critical Bug Fix**: Fixed duplicate measurement check (was checking all products instead of per product)
+5. 📝 **Update**: Corrected payload examples dengan valid product names
+6. 📝 **Update**: Added valid product names list per category
+7. 📝 **Update**: Clarified `due_date` format requirements
 
 #### December 2, 2024 - New Features & Endpoints
 1. ✅ Endpoint Baru: GET `/product-measurement/available-products`
@@ -1395,6 +1396,21 @@ Error processing measurement: Undefined array key "type"
 **Problem:**
 Untuk QUALITATIVE measurement items, field `type` tidak wajib (karena hanya QUANTITATIVE yang butuh), tapi code langsung mengakses `$setup['type']` tanpa cek nullable.
 
+**Fix:**
+- Gunakan variable `$type` yang sudah di-check nullable (`$type = $setup['type'] ?? null;`)
+- Tambahkan null coalescing operator untuk `qualitative_value`
+
+#### 4. Duplicate measurement check salah - Mengecek semua product
+**File:** `app/Http/Controllers/Api/V1/ProductMeasurementController.php` (Line 1244-1261)
+
+**Error Message:**
+```
+Error processing measurement: Undefined array key "type"
+```
+
+**Problem:**
+Untuk QUALITATIVE measurement items, field `type` tidak wajib (karena hanya QUANTITATIVE yang butuh), tapi code langsung mengakses `$setup['type']` tanpa cek nullable.
+
 **Before:**
 ```php
 // Set raw values berdasarkan type
@@ -1428,6 +1444,47 @@ if ($setup['nature'] === 'QUALITATIVE') {
 **Fix:**
 - Gunakan variable `$type` yang sudah di-check nullable (`$type = $setup['type'] ?? null;`)
 - Tambahkan null coalescing operator untuk `qualitative_value`
+
+#### 4. Duplicate measurement check salah - Mengecek semua product ⚠️ CRITICAL BUG
+**File:** `app/Http/Controllers/Api/V1/ProductMeasurementController.php` (Line 1244-1261)
+
+**Error Message:**
+```json
+{
+  "http_code": 400,
+  "message": "Quarter ini sudah memiliki measurement (maksimal 1 data per quarter)",
+  "error_id": "DUPLICATE_MEASUREMENT"
+}
+```
+
+**Problem:**
+Saat create measurement untuk **Product A**, sistem mengecek apakah ada measurement di quarter tersebut untuk **SEMUA product**, bukan hanya untuk Product A.
+
+**Scenario Bug:**
+- Product A sudah punya measurement di Q4 2024 ✅
+- User coba buat measurement untuk Product B di Q4 2024
+- ❌ Error: "Quarter ini sudah memiliki measurement"
+- ✅ Harusnya: Product B belum punya measurement, jadi BOLEH dibuat!
+
+**Before (SALAH):**
+```php
+return ProductMeasurement::where('measurement_type', 'FULL_MEASUREMENT')
+    ->whereBetween('measured_at', [$quarterRange['start'], $quarterRange['end']])
+    ->exists(); // ❌ Cek SEMUA product!
+```
+
+**After (BENAR):**
+```php
+return ProductMeasurement::where('product_id', $productId) // ✅ Filter by product
+    ->where('measurement_type', 'FULL_MEASUREMENT')
+    ->whereBetween('measured_at', [$quarterRange['start'], $quarterRange['end']])
+    ->exists();
+```
+
+**Impact:**
+- ✅ Product berbeda bisa punya measurement di quarter/hari yang sama
+- ✅ 1 Product hanya bisa 1 measurement per quarter (FULL_MEASUREMENT)
+- ✅ 1 Product hanya bisa 1 measurement per hari (SCALE_MEASUREMENT)
 
 ---
 
@@ -1685,9 +1742,10 @@ curl -X GET "http://localhost/api/v1/products/is-product-exists?product_category
 ## 📊 CHANGELOG SUMMARY
 
 ### December 4, 2024
-- ✅ **Bug Fix**: Fixed `variable_values` field name (`name_id` → `name`)
-- ✅ **Bug Fix**: Fixed `qualitative_value` type validation (boolean → string)
-- ✅ **Bug Fix**: Fixed undefined array key "type" error for QUALITATIVE measurements
+- 🐛 **Bug Fix**: Fixed `variable_values` field name (`name_id` → `name`)
+- 🐛 **Bug Fix**: Fixed `qualitative_value` type validation (boolean → string)
+- 🐛 **Bug Fix**: Fixed undefined array key "type" error for QUALITATIVE measurements
+- 🐛 **Critical Bug Fix**: Fixed duplicate measurement check (was checking all products, now checks per product)
 - ✅ **Update**: Corrected payload examples dengan valid product names
 - ✅ **Update**: Clarified `due_date` format requirements
 - ✅ **Documentation**: Added valid product names per category

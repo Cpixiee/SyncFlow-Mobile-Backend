@@ -1239,22 +1239,24 @@ class ProductMeasurementController extends Controller
     }
 
     /**
-     * Check if quarter/day has any measurement (regardless of product)
+     * Check if product already has measurement in the same quarter/day
      */
     private function checkProductDuplicate(int $productId, string $measurementType, string $dueDate): bool
     {
         if ($measurementType === 'FULL_MEASUREMENT') {
-            // Check for any measurement in same quarter (regardless of product)
+            // Check for measurement in same quarter for THIS PRODUCT
             $quarterRange = $this->getQuarterRange($dueDate);
-            return ProductMeasurement::where('measurement_type', 'FULL_MEASUREMENT')
+            return ProductMeasurement::where('product_id', $productId)
+                ->where('measurement_type', 'FULL_MEASUREMENT')
                 ->whereBetween('measured_at', [$quarterRange['start'], $quarterRange['end']])
                 ->exists();
         } else {
-            // Check for any measurement in same day (regardless of product)
+            // Check for measurement in same day for THIS PRODUCT
             $dayStart = date('Y-m-d 00:00:00', strtotime($dueDate));
             $dayEnd = date('Y-m-d 23:59:59', strtotime($dueDate));
             
-            return ProductMeasurement::where('measurement_type', 'SCALE_MEASUREMENT')
+            return ProductMeasurement::where('product_id', $productId)
+                ->where('measurement_type', 'SCALE_MEASUREMENT')
                 ->whereBetween('measured_at', [$dayStart, $dayEnd])
                 ->exists();
         }
