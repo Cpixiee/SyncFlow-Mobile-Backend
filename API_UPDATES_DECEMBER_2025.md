@@ -4,8 +4,17 @@
 
 Dokumen ini berisi semua perbaikan dan penambahan endpoint API yang dilakukan pada December 2025.
 
-### ✅ Daftar Perbaikan
+### ✅ Daftar Perbaikan (December 2024)
 
+#### December 4, 2024 - Bug Fixes & Documentation Updates
+1. 🐛 **Bug Fix**: Fixed `variable_values` field validation (`name_id` → `name`)
+2. 🐛 **Bug Fix**: Fixed `qualitative_value` type validation (boolean → string)
+3. 🐛 **Bug Fix**: Fixed "Undefined array key 'type'" error for QUALITATIVE measurements
+4. 📝 **Update**: Corrected payload examples dengan valid product names
+5. 📝 **Update**: Added valid product names list per category
+6. 📝 **Update**: Clarified `due_date` format requirements
+
+#### December 2, 2024 - New Features & Endpoints
 1. ✅ Endpoint Baru: GET `/product-measurement/available-products`
 2. ✅ Filter `product_category_id` di GET `/products`
 3. ✅ Fix Filter Quarter di GET `/product-measurement`
@@ -13,6 +22,7 @@ Dokumen ini berisi semua perbaikan dan penambahan endpoint API yang dilakukan pa
 5. ✅ Endpoint DELETE `/products/:id`
 6. ✅ Endpoint UPDATE `/products/:id`
 7. ✅ Endpoint `/products/is-product-exists` - Semua Field Basic Info
+8. ✅ **Feature**: Measurement Groups dengan Standalone Items support
 
 ---
 
@@ -493,25 +503,34 @@ Measurement Groups digunakan untuk **mengelompokkan dan mengurutkan** measuremen
 - Mengorganisir measurement items berdasarkan kategori (Physical, Chemical, Visual, dll)
 - Mengatur urutan tampilan measurement items
 - Memudahkan user saat melakukan measurement
+- **Mendukung standalone items** yang tidak perlu dikelompokkan
 
 ### Struktur Measurement Groups
+
+Ada 2 tipe dalam `measurement_groups`:
+
+#### 1. **Grouped Items** (Ada `group_name`)
+Items yang dikelompokkan bersama dengan nama grup.
+
+#### 2. **Standalone Items** (Tanpa `group_name` / `group_name: null`)
+Items yang tidak dikelompokkan, berdiri sendiri, tapi tetap bisa diposisikan dengan `order`.
 
 ```json
 {
   "measurement_groups": [
     {
-      "group_name": "Physical Properties",
-      "measurement_items": ["thickness", "width", "length"],
+      "group_name": "THICKNESS",
+      "measurement_items": ["thickness_a", "thickness_b"],
       "order": 1
     },
     {
-      "group_name": "Chemical Properties",
-      "measurement_items": ["ph_level", "density"],
+      "group_name": null,
+      "measurement_items": ["analyze"],
       "order": 2
     },
     {
-      "group_name": "Visual Inspection",
-      "measurement_items": ["color_check", "surface_quality"],
+      "group_name": "ROOM TEMP",
+      "measurement_items": ["room_temp"],
       "order": 3
     }
   ]
@@ -519,30 +538,30 @@ Measurement Groups digunakan untuk **mengelompokkan dan mengurutkan** measuremen
 ```
 
 **Field Explanation:**
-- `group_name`: Nama grup (contoh: "Physical Properties")
-- `measurement_items`: Array of `name_id` dari measurement points yang masuk grup ini
-- `order`: Urutan grup (ascending). Grup dengan order lebih kecil tampil lebih dulu
+- `group_name`: 
+  - **String**: Nama grup untuk grouped items (contoh: "THICKNESS", "Physical Properties")
+  - **null**: Untuk standalone items yang tidak perlu grup
+- `measurement_items`: Array of `name_id` dari measurement points
+  - Untuk grouped items: bisa berisi multiple items
+  - Untuk standalone items: biasanya 1 item (tapi bisa lebih jika diperlukan)
+- `order`: Urutan tampil (ascending). Order lebih kecil tampil lebih dulu
 
-### Contoh Lengkap: Create Product dengan Grouping
+### Contoh 1: Create Product dengan Mixed Grouping (Grouped + Standalone)
+
+**Use Case:** Ada thickness A & B yang digroup, lalu analyze standalone, lalu room_temp di group sendiri.
 
 ```json
 {
   "basic_info": {
     "product_category_id": 1,
-    "product_name": "TubeTest",
-    "ref_spec_number": "SPEC-TUBE-001",
-    "nom_size_vo": "25mm",
-    "article_code": "TUBE-25",
-    "no_document": "DOC-2024-001",
-    "no_doc_reference": "REF-2024-001",
-    "color": "#4A90E2",
-    "size": "Medium"
+    "product_name": "VO",
+    "ref_spec_number": "SPEC-001"
   },
   "measurement_points": [
     {
       "setup": {
-        "name": "Thickness",
-        "name_id": "thickness",
+        "name": "Thickness A",
+        "name_id": "thickness_a",
         "sample_amount": 5,
         "nature": "QUANTITATIVE",
         "source": "MANUAL",
@@ -566,9 +585,331 @@ Measurement Groups digunakan untuk **mengelompokkan dan mengurutkan** measuremen
     },
     {
       "setup": {
+        "name": "Thickness B",
+        "name_id": "thickness_b",
+        "sample_amount": 5,
+        "nature": "QUANTITATIVE",
+        "source": "MANUAL",
+        "type": "SINGLE"
+      },
+      "variables": [],
+      "pre_processing_formulas": [],
+      "evaluation_type": "PER_SAMPLE",
+      "evaluation_setting": {
+        "per_sample_setting": {
+          "is_raw_data": true
+        }
+      },
+      "rule_evaluation_setting": {
+        "rule": "BETWEEN",
+        "unit": "mm",
+        "value": 2.5,
+        "tolerance_minus": 0.1,
+        "tolerance_plus": 0.1
+      }
+    },
+    {
+      "setup": {
+        "name": "Analyze",
+        "name_id": "analyze",
+        "sample_amount": 1,
+        "nature": "QUALITATIVE",
+        "source": "MANUAL"
+      },
+      "variables": [],
+      "pre_processing_formulas": [],
+      "evaluation_type": "SKIP_CHECK",
+      "evaluation_setting": {
+        "qualitative_setting": {
+          "label": "Hasil analisa?"
+        }
+      },
+      "rule_evaluation_setting": null
+    },
+    {
+      "setup": {
+        "name": "Room Temperature",
+        "name_id": "room_temp",
+        "sample_amount": 1,
+        "nature": "QUANTITATIVE",
+        "source": "MANUAL",
+        "type": "SINGLE"
+      },
+      "variables": [],
+      "pre_processing_formulas": [],
+      "evaluation_type": "PER_SAMPLE",
+      "evaluation_setting": {
+        "per_sample_setting": {
+          "is_raw_data": true
+        }
+      },
+      "rule_evaluation_setting": {
+        "rule": "BETWEEN",
+        "unit": "°C",
+        "value": 25,
+        "tolerance_minus": 2,
+        "tolerance_plus": 2
+      }
+    }
+  ],
+  "measurement_groups": [
+    {
+      "group_name": "THICKNESS",
+      "measurement_items": ["thickness_a", "thickness_b"],
+      "order": 1
+    },
+    {
+      "group_name": null,
+      "measurement_items": ["analyze"],
+      "order": 2
+    },
+    {
+      "group_name": "ROOM TEMP",
+      "measurement_items": ["room_temp"],
+      "order": 3
+    }
+  ]
+}
+```
+
+**Hasil Urutan Pengukuran:**
+
+1. **THICKNESS** (Group, order: 1)
+   - Thickness A
+   - Thickness B
+
+2. **Analyze** (Standalone, order: 2)
+
+3. **ROOM TEMP** (Group, order: 3)
+   - Room Temperature
+
+---
+
+### Contoh 2: Product dengan Grouping Tradisional
+
+```json
+{
+  "basic_info": {
+    "product_category_id": 1,
+    "product_name": "COT"
+  },
+  "measurement_points": [
+    {"setup": {"name": "Thickness", "name_id": "thickness", ...}},
+    {"setup": {"name": "Width", "name_id": "width", ...}},
+    {"setup": {"name": "pH Level", "name_id": "ph_level", ...}},
+    {"setup": {"name": "Color", "name_id": "color", ...}}
+  ],
+  "measurement_groups": [
+    {
+      "group_name": "Physical Properties",
+      "measurement_items": ["thickness", "width"],
+      "order": 1
+    },
+    {
+      "group_name": "Chemical Properties",
+      "measurement_items": ["ph_level"],
+      "order": 2
+    },
+    {
+      "group_name": "Visual Inspection",
+      "measurement_items": ["color"],
+      "order": 3
+    }
+  ]
+}
+```
+
+**Hasil Urutan:**
+
+1. **Physical Properties** (order: 1)
+   - Thickness
+   - Width
+
+2. **Chemical Properties** (order: 2)
+   - pH Level
+
+3. **Visual Inspection** (order: 3)
+   - Color
+
+---
+
+### Measurement Items yang Tidak Didefinisikan di Groups
+
+Jika ada measurement items yang **tidak disebutkan** di `measurement_groups`, mereka akan otomatis muncul di **paling akhir** dengan order tinggi (9999+).
+
+**Contoh:**
+
+```json
+{
+  "measurement_points": [
+    {"setup": {"name_id": "item_1"}},
+    {"setup": {"name_id": "item_2"}},
+    {"setup": {"name_id": "item_3"}},
+    {"setup": {"name_id": "item_4"}}
+  ],
+  "measurement_groups": [
+    {
+      "group_name": "Group A",
+      "measurement_items": ["item_1", "item_2"],
+      "order": 1
+    }
+  ]
+}
+```
+
+**Hasil Urutan:**
+1. item_1 (Group A)
+2. item_2 (Group A)
+3. item_3 (Tidak didefinisikan, muncul di akhir)
+4. item_4 (Tidak didefinisikan, muncul di akhir)
+
+### Tips Penggunaan Grouping
+
+1. **Kapan menggunakan Grouped Items vs Standalone Items?**
+   - **Grouped Items** (`group_name` ada): Untuk measurement yang secara logis terkait
+     - Contoh: Thickness A, B, C → Group "THICKNESS"
+     - Contoh: pH, Density, Viscosity → Group "Chemical Properties"
+   
+   - **Standalone Items** (`group_name: null`): Untuk measurement yang berdiri sendiri
+     - Contoh: Analyze, Notes, Special Check
+     - Items yang tidak perlu dikelompokkan tapi perlu posisi spesifik
+
+2. **Gunakan order yang teratur**
+   - Beri jarak antar order (1, 10, 20, 30) untuk fleksibilitas insert item baru di tengah
+   - Order menentukan urutan tampilan saat pengukuran
+
+3. **Validation Rules**
+   - `name_id` di `measurement_items` harus valid (ada di `measurement_points`)
+   - Satu measurement item hanya bisa masuk ke 1 grup/entry
+   - Order harus integer
+   - `measurement_items` minimal berisi 1 item
+
+4. **Optional**
+   - `measurement_groups` bersifat optional
+   - Jika tidak diisi, measurement items ditampilkan sesuai urutan di array `measurement_points`
+
+5. **Best Practice**
+   - Untuk multiple items sejenis → gunakan grouped items
+   - Untuk single item yang perlu posisi khusus → gunakan standalone items
+   - Items yang tidak penting urutannya → biarkan tidak didefinisikan (akan muncul di akhir)
+
+---
+
+---
+
+## 🎯 PAYLOAD LENGKAP: Create Product sampai Submit Measurement (OK & NG)
+
+### STEP 1: CREATE PRODUCT dengan Grouping & Standalone
+
+**Endpoint:** `POST /api/v1/products`
+
+**Payload:**
+```json
+{
+  "basic_info": {
+    "product_category_id": 1,
+    "product_name": "TubeTest",
+    "ref_spec_number": "SPEC-001"
+  },
+  "measurement_points": [
+    {
+      "setup": {
+        "name": "Thickness A",
+        "name_id": "thickness_a",
+        "sample_amount": 3,
+        "nature": "QUANTITATIVE",
+        "source": "MANUAL",
+        "type": "SINGLE"
+      },
+      "variables": [],
+      "pre_processing_formulas": [],
+      "evaluation_type": "PER_SAMPLE",
+      "evaluation_setting": {
+        "per_sample_setting": {
+          "is_raw_data": true
+        }
+      },
+      "rule_evaluation_setting": {
+        "rule": "BETWEEN",
+        "unit": "mm",
+        "value": 2.5,
+        "tolerance_minus": 0.1,
+        "tolerance_plus": 0.1
+      }
+    },
+    {
+      "setup": {
+        "name": "Thickness B",
+        "name_id": "thickness_b",
+        "sample_amount": 3,
+        "nature": "QUANTITATIVE",
+        "source": "MANUAL",
+        "type": "SINGLE"
+      },
+      "variables": [],
+      "pre_processing_formulas": [],
+      "evaluation_type": "PER_SAMPLE",
+      "evaluation_setting": {
+        "per_sample_setting": {
+          "is_raw_data": true
+        }
+      },
+      "rule_evaluation_setting": {
+        "rule": "BETWEEN",
+        "unit": "mm",
+        "value": 2.5,
+        "tolerance_minus": 0.1,
+        "tolerance_plus": 0.1
+      }
+    },
+    {
+      "setup": {
+        "name": "Analyze Check",
+        "name_id": "analyze",
+        "sample_amount": 1,
+        "nature": "QUALITATIVE",
+        "source": "MANUAL"
+      },
+      "variables": [],
+      "pre_processing_formulas": [],
+      "evaluation_type": "SKIP_CHECK",
+      "evaluation_setting": {
+        "qualitative_setting": {
+          "label": "Hasil analisa visual?"
+        }
+      },
+      "rule_evaluation_setting": null
+    },
+    {
+      "setup": {
+        "name": "Room Temperature",
+        "name_id": "room_temp",
+        "sample_amount": 1,
+        "nature": "QUANTITATIVE",
+        "source": "MANUAL",
+        "type": "SINGLE"
+      },
+      "variables": [],
+      "pre_processing_formulas": [],
+      "evaluation_type": "PER_SAMPLE",
+      "evaluation_setting": {
+        "per_sample_setting": {
+          "is_raw_data": true
+        }
+      },
+      "rule_evaluation_setting": {
+        "rule": "BETWEEN",
+        "unit": "°C",
+        "value": 25,
+        "tolerance_minus": 3,
+        "tolerance_plus": 3
+      }
+    },
+    {
+      "setup": {
         "name": "Width",
         "name_id": "width",
-        "sample_amount": 5,
+        "sample_amount": 3,
         "nature": "QUANTITATIVE",
         "source": "MANUAL",
         "type": "SINGLE"
@@ -588,12 +929,415 @@ Measurement Groups digunakan untuk **mengelompokkan dan mengurutkan** measuremen
         "tolerance_minus": 0.5,
         "tolerance_plus": 0.5
       }
+    }
+  ],
+  "measurement_groups": [
+    {
+      "group_name": "THICKNESS",
+      "measurement_items": ["thickness_a", "thickness_b"],
+      "order": 1
+    },
+    {
+      "group_name": null,
+      "measurement_items": ["analyze"],
+      "order": 2
+    },
+    {
+      "group_name": "ROOM TEMP",
+      "measurement_items": ["room_temp"],
+      "order": 3
+    }
+  ]
+}
+```
+
+**Penjelasan Grouping:**
+- **Order 1 - THICKNESS** (Group): thickness_a, thickness_b
+- **Order 2 - Standalone**: analyze (group_name: null) ← **DI TENGAH GROUPING!**
+- **Order 3 - ROOM TEMP** (Group): room_temp
+- **width**: Tidak didefinisikan di groups, akan muncul paling akhir (order 9999+)
+
+**☑️ PENTING:** Standalone items (group_name: null) **BISA diposisikan di mana saja** (awal, tengah, akhir) sesuai order-nya!
+
+---
+
+### STEP 2: CREATE MEASUREMENT ENTRY
+
+**Endpoint:** `POST /api/v1/product-measurement`
+
+**Payload:**
+```json
+{
+  "product_id": "PRD-ABC12345",
+  "batch_number": "BATCH-20241204-001",
+  "sample_count": 3,
+  "measurement_type": "FULL_MEASUREMENT",
+  "due_date": "2024-12-10",
+  "notes": "Pengukuran batch pertama"
+}
+```
+
+**Note:** Format `due_date`:
+- ✅ Gunakan format `Y-m-d` (contoh: `"2024-12-10"`)
+- ✅ Atau ISO 8601: `Y-m-d\TH:i:s` (contoh: `"2024-12-10T10:00:00"`)
+- ⚠️ Tanggal harus >= hari ini (`after_or_equal:today`)
+
+---
+
+### STEP 3A: SUBMIT MEASUREMENT - Hasil OK
+
+**Endpoint:** `POST /api/v1/product-measurement/{measurement_id}/submit`
+
+**Payload:**
+```json
+{
+  "measurement_results": [
+    {
+      "measurement_item_name_id": "thickness_a",
+      "variable_values": [],
+      "samples": [
+        {
+          "sample_index": 1,
+          "single_value": 2.48,
+          "before_after_value": null,
+          "qualitative_value": null
+        },
+        {
+          "sample_index": 2,
+          "single_value": 2.52,
+          "before_after_value": null,
+          "qualitative_value": null
+        },
+        {
+          "sample_index": 3,
+          "single_value": 2.50,
+          "before_after_value": null,
+          "qualitative_value": null
+        }
+      ],
+      "joint_setting_formula_values": []
+    },
+    {
+      "measurement_item_name_id": "thickness_b",
+      "variable_values": [],
+      "samples": [
+        {
+          "sample_index": 1,
+          "single_value": 2.49,
+          "before_after_value": null,
+          "qualitative_value": null
+        },
+        {
+          "sample_index": 2,
+          "single_value": 2.51,
+          "before_after_value": null,
+          "qualitative_value": null
+        },
+        {
+          "sample_index": 3,
+          "single_value": 2.50,
+          "before_after_value": null,
+          "qualitative_value": null
+        }
+      ],
+      "joint_setting_formula_values": []
+    },
+    {
+      "measurement_item_name_id": "analyze",
+      "variable_values": [],
+      "samples": [
+        {
+          "sample_index": 1,
+          "single_value": null,
+          "before_after_value": null,
+          "qualitative_value": "Permukaan halus, tidak ada cacat"
+        }
+      ],
+      "joint_setting_formula_values": []
+    },
+    {
+      "measurement_item_name_id": "room_temp",
+      "variable_values": [],
+      "samples": [
+        {
+          "sample_index": 1,
+          "single_value": 24.5,
+          "before_after_value": null,
+          "qualitative_value": null
+        }
+      ],
+      "joint_setting_formula_values": []
+    },
+    {
+      "measurement_item_name_id": "width",
+      "variable_values": [],
+      "samples": [
+        {
+          "sample_index": 1,
+          "single_value": 25.2,
+          "before_after_value": null,
+          "qualitative_value": null
+        },
+        {
+          "sample_index": 2,
+          "single_value": 25.1,
+          "before_after_value": null,
+          "qualitative_value": null
+        },
+        {
+          "sample_index": 3,
+          "single_value": 25.3,
+          "before_after_value": null,
+          "qualitative_value": null
+        }
+      ],
+      "joint_setting_formula_values": []
+    }
+  ]
+}
+```
+
+---
+
+### STEP 3B: SUBMIT MEASUREMENT - Hasil NG
+
+**Payload:**
+```json
+{
+  "measurement_results": [
+    {
+      "measurement_item_name_id": "thickness_a",
+      "variable_values": [],
+      "samples": [
+        {
+          "sample_index": 1,
+          "single_value": 2.70,
+          "before_after_value": null,
+          "qualitative_value": null
+        },
+        {
+          "sample_index": 2,
+          "single_value": 2.65,
+          "before_after_value": null,
+          "qualitative_value": null
+        },
+        {
+          "sample_index": 3,
+          "single_value": 2.68,
+          "before_after_value": null,
+          "qualitative_value": null
+        }
+      ],
+      "joint_setting_formula_values": []
+    },
+    {
+      "measurement_item_name_id": "thickness_b",
+      "variable_values": [],
+      "samples": [
+        {
+          "sample_index": 1,
+          "single_value": 2.49,
+          "before_after_value": null,
+          "qualitative_value": null
+        },
+        {
+          "sample_index": 2,
+          "single_value": 2.51,
+          "before_after_value": null,
+          "qualitative_value": null
+        },
+        {
+          "sample_index": 3,
+          "single_value": 2.50,
+          "before_after_value": null,
+          "qualitative_value": null
+        }
+      ],
+      "joint_setting_formula_values": []
+    },
+    {
+      "measurement_item_name_id": "analyze",
+      "variable_values": [],
+      "samples": [
+        {
+          "sample_index": 1,
+          "single_value": null,
+          "before_after_value": null,
+          "qualitative_value": "Permukaan normal"
+        }
+      ],
+      "joint_setting_formula_values": []
+    },
+    {
+      "measurement_item_name_id": "room_temp",
+      "variable_values": [],
+      "samples": [
+        {
+          "sample_index": 1,
+          "single_value": 30.5,
+          "before_after_value": null,
+          "qualitative_value": null
+        }
+      ],
+      "joint_setting_formula_values": []
+    },
+    {
+      "measurement_item_name_id": "width",
+      "variable_values": [],
+      "samples": [
+        {
+          "sample_index": 1,
+          "single_value": 25.2,
+          "before_after_value": null,
+          "qualitative_value": null
+        },
+        {
+          "sample_index": 2,
+          "single_value": 25.1,
+          "before_after_value": null,
+          "qualitative_value": null
+        },
+        {
+          "sample_index": 3,
+          "single_value": 25.3,
+          "before_after_value": null,
+          "qualitative_value": null
+        }
+      ],
+      "joint_setting_formula_values": []
+    }
+  ]
+}
+```
+
+**Penjelasan NG:**
+- **thickness_a**: NG karena semua sample (2.65-2.70) melebihi batas max 2.60 (2.5 + 0.1)
+- **room_temp**: NG karena 30.5°C melebihi batas max 28°C (25 + 3)
+- **Overall Result**: NG karena ada minimal 1 item NG
+
+---
+
+## ✅ KONFIRMASI: Standalone Items Bisa Di Tengah Grouping
+
+### Contoh Kasus yang User Tanyakan:
+
+**Payload measurement_groups:**
+```json
+{
+  "measurement_groups": [
+    {
+      "group_name": "THICKNESS",
+      "measurement_items": ["thickness_a", "thickness_b"],
+      "order": 1
+    },
+    {
+      "group_name": null,
+      "measurement_items": ["analyze"],
+      "order": 2
+    },
+    {
+      "group_name": "ROOM TEMP",
+      "measurement_items": ["room_temp"],
+      "order": 3
+    }
+  ]
+}
+```
+
+**Hasil Urutan Saat Pengukuran:**
+
+```
+┌─────────────────────────────────────────┐
+│ ORDER 1: THICKNESS (Group)              │
+├─────────────────────────────────────────┤
+│   • Thickness A                         │
+│   • Thickness B                         │
+├─────────────────────────────────────────┤
+│ ORDER 2: Analyze (Standalone) ⬅️ TENGAH! │
+├─────────────────────────────────────────┤
+│ ORDER 3: ROOM TEMP (Group)              │
+├─────────────────────────────────────────┤
+│   • Room Temperature                    │
+└─────────────────────────────────────────┘
+```
+
+**Response GET Product:**
+```json
+{
+  "measurement_points": [
+    {
+      "setup": {"name": "Thickness A", "name_id": "thickness_a"},
+      "group_name": "THICKNESS",
+      "group_order": 1
+    },
+    {
+      "setup": {"name": "Thickness B", "name_id": "thickness_b"},
+      "group_name": "THICKNESS",
+      "group_order": 1
+    },
+    {
+      "setup": {"name": "Analyze", "name_id": "analyze"},
+      "group_name": null,
+      "group_order": 2
+    },
+    {
+      "setup": {"name": "Room Temperature", "name_id": "room_temp"},
+      "group_name": "ROOM TEMP",
+      "group_order": 3
+    }
+  ]
+}
+```
+
+**✅ KESIMPULAN:**
+- ✅ **Group** (order 1) → posisi pertama
+- ✅ **Standalone** (order 2) → posisi **DI TENGAH** ← **BISA!**
+- ✅ **Group** (order 3) → posisi ketiga
+
+**Order menentukan posisi, bukan tipe (grouped/standalone)!**
+
+---
+
+### STEP 4: CREATE PRODUCT TANPA GROUPING
+
+**Payload:**
+```json
+{
+  "basic_info": {
+    "product_category_id": 1,
+    "product_name": "COTO"
+  },
+  "measurement_points": [
+    {
+      "setup": {
+        "name": "Weight",
+        "name_id": "weight",
+        "sample_amount": 3,
+        "nature": "QUANTITATIVE",
+        "source": "MANUAL",
+        "type": "SINGLE"
+      },
+      "variables": [],
+      "pre_processing_formulas": [],
+      "evaluation_type": "PER_SAMPLE",
+      "evaluation_setting": {
+        "per_sample_setting": {
+          "is_raw_data": true
+        }
+      },
+      "rule_evaluation_setting": {
+        "rule": "BETWEEN",
+        "unit": "g",
+        "value": 100,
+        "tolerance_minus": 5,
+        "tolerance_plus": 5
+      }
     },
     {
       "setup": {
         "name": "Length",
         "name_id": "length",
-        "sample_amount": 5,
+        "sample_amount": 3,
         "nature": "QUANTITATIVE",
         "source": "MANUAL",
         "type": "SINGLE"
@@ -609,181 +1353,170 @@ Measurement Groups digunakan untuk **mengelompokkan dan mengurutkan** measuremen
       "rule_evaluation_setting": {
         "rule": "BETWEEN",
         "unit": "mm",
-        "value": 100,
+        "value": 50,
         "tolerance_minus": 1,
         "tolerance_plus": 1
       }
-    },
-    {
-      "setup": {
-        "name": "pH Level",
-        "name_id": "ph_level",
-        "sample_amount": 3,
-        "nature": "QUANTITATIVE",
-        "source": "MANUAL",
-        "type": "SINGLE"
-      },
-      "variables": [],
-      "pre_processing_formulas": [],
-      "evaluation_type": "PER_SAMPLE",
-      "evaluation_setting": {
-        "per_sample_setting": {
-          "is_raw_data": true
-        }
-      },
-      "rule_evaluation_setting": {
-        "rule": "BETWEEN",
-        "unit": "pH",
-        "value": 7,
-        "tolerance_minus": 0.5,
-        "tolerance_plus": 0.5
-      }
-    },
-    {
-      "setup": {
-        "name": "Density",
-        "name_id": "density",
-        "sample_amount": 3,
-        "nature": "QUANTITATIVE",
-        "source": "MANUAL",
-        "type": "SINGLE"
-      },
-      "variables": [],
-      "pre_processing_formulas": [],
-      "evaluation_type": "PER_SAMPLE",
-      "evaluation_setting": {
-        "per_sample_setting": {
-          "is_raw_data": true
-        }
-      },
-      "rule_evaluation_setting": {
-        "rule": "BETWEEN",
-        "unit": "g/cm³",
-        "value": 1.2,
-        "tolerance_minus": 0.05,
-        "tolerance_plus": 0.05
-      }
-    },
-    {
-      "setup": {
-        "name": "Color Check",
-        "name_id": "color_check",
-        "sample_amount": 1,
-        "nature": "QUALITATIVE",
-        "source": "MANUAL"
-      },
-      "variables": [],
-      "pre_processing_formulas": [],
-      "evaluation_type": "SKIP_CHECK",
-      "evaluation_setting": {
-        "qualitative_setting": {
-          "label": "Apakah warna sesuai standar?"
-        }
-      },
-      "rule_evaluation_setting": null
-    },
-    {
-      "setup": {
-        "name": "Surface Quality",
-        "name_id": "surface_quality",
-        "sample_amount": 1,
-        "nature": "QUALITATIVE",
-        "source": "MANUAL"
-      },
-      "variables": [],
-      "pre_processing_formulas": [],
-      "evaluation_type": "SKIP_CHECK",
-      "evaluation_setting": {
-        "qualitative_setting": {
-          "label": "Apakah permukaan bebas cacat?"
-        }
-      },
-      "rule_evaluation_setting": null
-    }
-  ],
-  "measurement_groups": [
-    {
-      "group_name": "Dimensi Fisik",
-      "measurement_items": ["thickness", "width", "length"],
-      "order": 1
-    },
-    {
-      "group_name": "Properti Kimia",
-      "measurement_items": ["ph_level", "density"],
-      "order": 2
-    },
-    {
-      "group_name": "Inspeksi Visual",
-      "measurement_items": ["color_check", "surface_quality"],
-      "order": 3
     }
   ]
 }
 ```
 
-### Hasil Grouping
+**Catatan:** Tidak ada field `measurement_groups`, items ditampilkan sesuai urutan array.
 
-Setelah product dibuat dengan grouping di atas, measurement items akan diurutkan sebagai berikut:
+---
 
-**Grup 1: Dimensi Fisik** (order: 1)
-1. Thickness
-2. Width
-3. Length
+## 🔧 BUG FIXES
 
-**Grup 2: Properti Kimia** (order: 2)
-4. pH Level
-5. Density
+### Fixed Validation Errors (December 4, 2024)
 
-**Grup 3: Inspeksi Visual** (order: 3)
-6. Color Check
-7. Surface Quality
+#### 1. variable_values field name
+**File:** `app/Http/Controllers/Api/V1/ProductMeasurementController.php` (Line 1029)
 
-### Measurement Items yang Tidak Dikelompokkan
+- **Before:** `'measurement_results.*.variable_values.*.name_id'`
+- **After:** `'measurement_results.*.variable_values.*.name'`
+- **Reason:** Variable menggunakan `name`, bukan `name_id`
 
-Jika ada measurement items yang tidak masuk ke grup manapun, mereka akan otomatis masuk ke grup "Ungrouped" dengan order = 999 (paling akhir).
+#### 2. qualitative_value type
+**File:** `app/Http/Controllers/Api/V1/ProductMeasurementController.php` (Line 1038)
 
-Contoh:
+- **Before:** `'measurement_results.*.samples.*.qualitative_value' => 'nullable|boolean'`
+- **After:** `'measurement_results.*.samples.*.qualitative_value' => 'nullable|string'`
+- **Reason:** Qualitative value adalah text/string, bukan boolean
+
+#### 3. Undefined array key "type" error
+**File:** `app/Models/ProductMeasurement.php` (Line 200-208)
+
+**Error Message:**
+```
+Error processing measurement: Undefined array key "type"
+```
+
+**Problem:**
+Untuk QUALITATIVE measurement items, field `type` tidak wajib (karena hanya QUANTITATIVE yang butuh), tapi code langsung mengakses `$setup['type']` tanpa cek nullable.
+
+**Before:**
+```php
+// Set raw values berdasarkan type
+if ($setup['type'] === 'SINGLE') {
+    $processedSample['raw_values']['single_value'] = $sample['single_value'];
+} elseif ($setup['type'] === 'BEFORE_AFTER') {
+    $processedSample['raw_values']['before_after_value'] = $sample['before_after_value'];
+}
+
+// Set qualitative value jika ada
+if ($setup['nature'] === 'QUALITATIVE') {
+    $processedSample['raw_values']['qualitative_value'] = $sample['qualitative_value'];
+}
+```
+
+**After:**
+```php
+// Set raw values berdasarkan type
+if ($type === 'SINGLE') {
+    $processedSample['raw_values']['single_value'] = $sample['single_value'];
+} elseif ($type === 'BEFORE_AFTER') {
+    $processedSample['raw_values']['before_after_value'] = $sample['before_after_value'];
+}
+
+// Set qualitative value jika ada
+if ($setup['nature'] === 'QUALITATIVE') {
+    $processedSample['raw_values']['qualitative_value'] = $sample['qualitative_value'] ?? null;
+}
+```
+
+**Fix:**
+- Gunakan variable `$type` yang sudah di-check nullable (`$type = $setup['type'] ?? null;`)
+- Tambahkan null coalescing operator untuk `qualitative_value`
+
+---
+
+### Response Format untuk Product dengan Grouping
+
+Ketika product di-retrieve (GET `/products` atau GET `/product-measurement/available-products`), measurement points akan dikembalikan dengan informasi grouping:
+
+**Response Example:**
+
 ```json
 {
-  "measurement_points": [
-    {"setup": {"name_id": "item_1"}},
-    {"setup": {"name_id": "item_2"}},
-    {"setup": {"name_id": "item_3"}}
-  ],
-  "measurement_groups": [
-    {
-      "group_name": "Group A",
-      "measurement_items": ["item_1"],
-      "order": 1
-    }
-  ]
+  "http_code": 200,
+  "message": "Success",
+  "data": {
+    "id": 1,
+    "product_id": "PRD-ABC123",
+    "product_name": "TubeTest",
+    "measurement_points": [
+      {
+        "setup": {
+          "name": "Thickness A",
+          "name_id": "thickness_a",
+          "sample_amount": 5,
+          "nature": "QUANTITATIVE",
+          "source": "MANUAL",
+          "type": "SINGLE"
+        },
+        "group_name": "THICKNESS",
+        "group_order": 1,
+        "evaluation_type": "PER_SAMPLE",
+        "rule_evaluation_setting": {...}
+      },
+      {
+        "setup": {
+          "name": "Thickness B",
+          "name_id": "thickness_b",
+          "sample_amount": 5,
+          "nature": "QUANTITATIVE",
+          "source": "MANUAL",
+          "type": "SINGLE"
+        },
+        "group_name": "THICKNESS",
+        "group_order": 1,
+        "evaluation_type": "PER_SAMPLE",
+        "rule_evaluation_setting": {...}
+      },
+      {
+        "setup": {
+          "name": "Analyze",
+          "name_id": "analyze",
+          "sample_amount": 1,
+          "nature": "QUALITATIVE",
+          "source": "MANUAL"
+        },
+        "group_name": null,
+        "group_order": 2,
+        "evaluation_type": "SKIP_CHECK",
+        "evaluation_setting": {...}
+      },
+      {
+        "setup": {
+          "name": "Room Temperature",
+          "name_id": "room_temp",
+          "sample_amount": 1,
+          "nature": "QUANTITATIVE",
+          "source": "MANUAL",
+          "type": "SINGLE"
+        },
+        "group_name": "ROOM TEMP",
+        "group_order": 3,
+        "evaluation_type": "PER_SAMPLE",
+        "rule_evaluation_setting": {...}
+      }
+    ]
+  }
 }
 ```
 
-Hasil urutan:
-1. item_1 (Group A)
-2. item_2 (Ungrouped)
-3. item_3 (Ungrouped)
+**Field Explanation di Response:**
+- `group_name`: 
+  - **String** = Item ini bagian dari grup
+  - **null** = Item standalone (tidak dikelompokkan)
+- `group_order`: Urutan tampilan (sudah sorted dari backend)
 
-### Tips Penggunaan Grouping
-
-1. **Buat grup berdasarkan kategori measurement**
-   - Physical (Thickness, Width, Length)
-   - Chemical (pH, Density, Viscosity)
-   - Visual (Color, Surface, Defects)
-   - Functional (Strength, Durability)
-
-2. **Gunakan order yang teratur**
-   - Beri jarak antar order (1, 10, 20) untuk fleksibilitas insert grup baru di tengah
-
-3. **Validation**
-   - `name_id` di `measurement_items` harus valid (ada di `measurement_points`)
-   - Satu measurement item bisa masuk ke 1 grup saja
-   - Order harus integer
-
-4. **Optional**
-   - `measurement_groups` bersifat optional
-   - Jika tidak diisi, measurement items ditampilkan sesuai urutan di array `measurement_points`
+**Frontend Implementation:**
+Frontend bisa menampilkan UI berdasarkan `group_name`:
+- Jika `group_name` ada → Tampilkan sebagai grup dengan header
+- Jika `group_name` null → Tampilkan sebagai item standalone tanpa header grup
+- Items sudah sorted by `group_order`, tinggal render sesuai urutan array
 
 ---
 
@@ -868,6 +1601,36 @@ Endpoint `/products/is-product-exists` membandingkan **SEMUA field** basic info:
 
 Field nullable yang tidak diisi vs diisi dianggap **berbeda**.
 
+### 6. Valid Product Names per Category
+
+Product name **harus valid** sesuai dengan product category. Gunakan salah satu dari list berikut:
+
+#### Tube Test (Category ID: 1)
+```
+VO, COTO, COT, COTO-FR, COT-FR, CORUTUBE → PFPY17, 
+CORUTUBE → PFP-FR-UF-09PL, CORUTUBE → PFP-FR-HEV-YKA, 
+CORUTUBE → PFP-FR-HEV-YSA, RFCOT, HCOT
+```
+
+#### Wire Test Reguler (Category ID: 2)
+```
+CAVS, ACCAVS, CIVUS, ACCIVUS, AVSS, AVSSH, AVS, AV
+```
+
+#### Shield Wire Test (Category ID: 3)
+```
+CIVUSAS, CIVUSAS-S, CAVSAS-S, AVSSHCS, AVSSCS, AVSSCS-S
+```
+
+**Error jika product_name tidak valid:**
+```json
+{
+  "http_code": 400,
+  "message": "Product name \"XYZ\" tidak valid untuk category \"Tube Test\"",
+  "error_id": "INVALID_PRODUCT_NAME"
+}
+```
+
 ---
 
 ## 🧪 Testing Endpoints
@@ -919,6 +1682,28 @@ curl -X GET "http://localhost/api/v1/products/is-product-exists?product_category
 
 ---
 
+## 📊 CHANGELOG SUMMARY
+
+### December 4, 2024
+- ✅ **Bug Fix**: Fixed `variable_values` field name (`name_id` → `name`)
+- ✅ **Bug Fix**: Fixed `qualitative_value` type validation (boolean → string)
+- ✅ **Bug Fix**: Fixed undefined array key "type" error for QUALITATIVE measurements
+- ✅ **Update**: Corrected payload examples dengan valid product names
+- ✅ **Update**: Clarified `due_date` format requirements
+- ✅ **Documentation**: Added valid product names per category
+
+### December 2, 2024
+- ✅ Added endpoint: `GET /product-measurement/available-products`
+- ✅ Added filter: `product_category_id` di `GET /products`
+- ✅ Fixed filter: Quarter di `GET /product-measurement`
+- ✅ Updated: Tools calibration fields (`last_calibration_at`, `next_calibration_at`)
+- ✅ Added endpoint: `DELETE /products/{id}`
+- ✅ Added endpoint: `PUT /products/{id}`
+- ✅ Updated endpoint: `GET /products/is-product-exists` (all fields support)
+- ✅ Added feature: Measurement Groups dengan Standalone Items support
+
+---
+
 ## 📚 Referensi
 
 - [OpenAPI Documentation](./openapi.yaml)
@@ -931,5 +1716,5 @@ curl -X GET "http://localhost/api/v1/products/is-product-exists?product_category
 
 Jika ada pertanyaan atau issue terkait API updates ini, silakan hubungi tim development.
 
-**Last Updated:** December 2, 2025
+**Last Updated:** December 4, 2024
 

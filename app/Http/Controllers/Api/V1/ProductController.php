@@ -75,8 +75,8 @@ class ProductController extends Controller
 
                 // Measurement Groups
                 'measurement_groups' => 'nullable|array',
-                'measurement_groups.*.group_name' => 'required_with:measurement_groups|string',
-                'measurement_groups.*.measurement_items' => 'required_with:measurement_groups|array',
+                'measurement_groups.*.group_name' => 'nullable|string', // Optional: null for standalone items
+                'measurement_groups.*.measurement_items' => 'required_with:measurement_groups|array|min:1',
                 'measurement_groups.*.order' => 'required_with:measurement_groups|integer',
             ]);
 
@@ -200,6 +200,14 @@ class ProductController extends Controller
                 return $this->notFoundResponse('Product tidak ditemukan');
             }
 
+            // Process measurement grouping untuk sorting dan menambahkan group info
+            $measurementPoints = $product->measurement_points ?? [];
+            $measurementGroups = $product->measurement_groups ?? [];
+            
+            if (!empty($measurementGroups)) {
+                $measurementPoints = $this->processMeasurementGrouping($measurementPoints, $measurementGroups);
+            }
+
             return $this->successResponse([
                 'id' => $product->product_id,
                 'basic_info' => [
@@ -213,7 +221,7 @@ class ProductController extends Controller
                     'color' => $product->color,
                     'size' => $product->size,
                 ],
-                'measurement_points' => $product->measurement_points,
+                'measurement_points' => $measurementPoints,
             ]);
 
         } catch (\Exception $e) {
@@ -471,8 +479,8 @@ class ProductController extends Controller
 
                 // Measurement Groups
                 'measurement_groups' => 'nullable|array',
-                'measurement_groups.*.group_name' => 'required_with:measurement_groups|string',
-                'measurement_groups.*.measurement_items' => 'required_with:measurement_groups|array',
+                'measurement_groups.*.group_name' => 'nullable|string', // Optional: null for standalone items
+                'measurement_groups.*.measurement_items' => 'required_with:measurement_groups|array|min:1',
                 'measurement_groups.*.order' => 'required_with:measurement_groups|integer',
             ]);
 
@@ -692,12 +700,22 @@ class ProductController extends Controller
         });
 
         foreach ($measurementGroups as $group) {
+            $hasGroupName = !empty($group['group_name']);
+            
             foreach ($group['measurement_items'] as $itemNameId) {
                 if (isset($measurementMap[$itemNameId])) {
                     // Add group information to measurement point
                     $measurementPoint = $measurementMap[$itemNameId];
-                    $measurementPoint['group_name'] = $group['group_name'];
-                    $measurementPoint['group_order'] = $group['order'];
+                    
+                    // If group_name exists, this is a grouped item
+                    // If group_name is null/empty, this is a standalone item
+                    if ($hasGroupName) {
+                        $measurementPoint['group_name'] = $group['group_name'];
+                        $measurementPoint['group_order'] = $group['order'];
+                    } else {
+                        $measurementPoint['group_name'] = null; // Standalone item
+                        $measurementPoint['group_order'] = $group['order'];
+                    }
 
                     $orderedMeasurementPoints[] = $measurementPoint;
                     unset($measurementMap[$itemNameId]); // Remove from map to avoid duplicates
@@ -705,10 +723,12 @@ class ProductController extends Controller
             }
         }
 
-        // Add any remaining measurement points that weren't grouped
+        // Add any remaining measurement points that weren't specified in any group
+        // These will be put at the end with original order from measurement_points array
+        $remainingOrder = 9999; // High number to ensure they appear at the end
         foreach ($measurementMap as $point) {
-            $point['group_name'] = 'Ungrouped';
-            $point['group_order'] = 999; // Put ungrouped items at the end
+            $point['group_name'] = null; // Not grouped
+            $point['group_order'] = $remainingOrder++; // Increment to maintain their relative order
             $orderedMeasurementPoints[] = $point;
         }
 

@@ -197,15 +197,15 @@ class ProductMeasurement extends Model
             ];
 
             // Set raw values berdasarkan type
-            if ($setup['type'] === 'SINGLE') {
+            if ($type === 'SINGLE') {
                 $processedSample['raw_values']['single_value'] = $sample['single_value'];
-            } elseif ($setup['type'] === 'BEFORE_AFTER') {
+            } elseif ($type === 'BEFORE_AFTER') {
                 $processedSample['raw_values']['before_after_value'] = $sample['before_after_value'];
             }
 
             // Set qualitative value jika ada
             if ($setup['nature'] === 'QUALITATIVE') {
-                $processedSample['raw_values']['qualitative_value'] = $sample['qualitative_value'];
+                $processedSample['raw_values']['qualitative_value'] = $sample['qualitative_value'] ?? null;
             }
 
             // Process pre-processing formulas jika ada
