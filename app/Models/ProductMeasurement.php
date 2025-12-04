@@ -20,10 +20,12 @@ class ProductMeasurement extends Model
         'sample_count',
         'measurement_type',
         'status',
+        'sample_status',
         'overall_result',
         'measurement_results',
         'measured_by',
         'measured_at',
+        'due_date',
         'notes'
     ];
 
@@ -31,7 +33,9 @@ class ProductMeasurement extends Model
         'overall_result' => 'boolean',
         'measurement_results' => 'array',
         'measured_at' => 'datetime',
+        'due_date' => 'datetime',
         'measurement_type' => MeasurementType::class,
+        'sample_status' => SampleStatus::class,
     ];
 
     /**

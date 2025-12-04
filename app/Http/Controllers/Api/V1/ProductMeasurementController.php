@@ -49,13 +49,14 @@ class ProductMeasurementController extends Controller
             // Get all products
             $allProductsQuery = Product::with(['quarter', 'productCategory']);
 
-            // Get products yang sudah punya measurement di quarter ini
-            $productsWithMeasurement = ProductMeasurement::whereBetween('measured_at', [$quarterRange['start'], $quarterRange['end']])
+            // Get products yang sudah punya due_date di quarter ini
+            $productsWithMeasurement = ProductMeasurement::whereBetween('due_date', [$quarterRange['start'], $quarterRange['end']])
+                ->whereNotNull('due_date') // Pastikan due_date tidak null
                 ->pluck('product_id')
                 ->unique()
                 ->toArray();
 
-            // Filter products yang belum punya measurement di quarter ini
+            // Filter products yang belum punya measurement (due_date) di quarter ini
             if (!empty($productsWithMeasurement)) {
                 $allProductsQuery->whereNotIn('id', $productsWithMeasurement);
             }
@@ -126,6 +127,7 @@ class ProductMeasurementController extends Controller
                 'query' => 'nullable|string|max:255',
                 'quarter' => 'nullable|integer|min:1|max:4',
                 'year' => 'nullable|integer|min:2020|max:2100',
+                'month' => 'nullable|integer|min:1|max:12',
             ]);
 
             if ($validator->fails()) {
@@ -145,6 +147,7 @@ class ProductMeasurementController extends Controller
             $query = $request->get('query');
             $quarter = $request->get('quarter');
             $year = $request->get('year');
+            $month = $request->get('month');
 
             // Build base query with ProductMeasurement join
             $productsQuery = Product::with(['productCategory', 'quarter'])
@@ -160,9 +163,14 @@ class ProductMeasurementController extends Controller
             // Filter by quarter and year if provided
             if ($quarter && $year) {
                 $quarterRange = $this->getQuarterRangeFromQuarterNumber($quarter, $year);
-                $productsQuery->whereBetween('product_measurements.measured_at', [$quarterRange['start'], $quarterRange['end']]);
+                $productsQuery->whereBetween('product_measurements.due_date', [$quarterRange['start'], $quarterRange['end']]);
+            } elseif ($month && $year) {
+                // Filter by month and year
+                $monthStart = $year . '-' . sprintf('%02d', $month) . '-01 00:00:00';
+                $monthEnd = date('Y-m-t 23:59:59', strtotime($monthStart));
+                $productsQuery->whereBetween('product_measurements.due_date', [$monthStart, $monthEnd]);
             } elseif ($startDate && $endDate) {
-                $productsQuery->whereBetween('product_measurements.measured_at', [$startDate, $endDate]);
+                $productsQuery->whereBetween('product_measurements.due_date', [$startDate, $endDate]);
             }
 
             // Apply filters
@@ -195,9 +203,14 @@ class ProductMeasurementController extends Controller
                 // Filter by quarter and year if provided
                 if ($quarter && $year) {
                     $quarterRange = $this->getQuarterRangeFromQuarterNumber($quarter, $year);
-                    $measurementQuery->whereBetween('measured_at', [$quarterRange['start'], $quarterRange['end']]);
+                    $measurementQuery->whereBetween('due_date', [$quarterRange['start'], $quarterRange['end']]);
+                } elseif ($month && $year) {
+                    // Filter by month and year
+                    $monthStart = $year . '-' . sprintf('%02d', $month) . '-01 00:00:00';
+                    $monthEnd = date('Y-m-t 23:59:59', strtotime($monthStart));
+                    $measurementQuery->whereBetween('due_date', [$monthStart, $monthEnd]);
                 } elseif ($startDate && $endDate) {
-                    $measurementQuery->whereBetween('measured_at', [$startDate, $endDate]);
+                    $measurementQuery->whereBetween('due_date', [$startDate, $endDate]);
                 }
                 
                 $latestMeasurement = $measurementQuery->latest('created_at')->first();
@@ -223,7 +236,7 @@ class ProductMeasurementController extends Controller
                     'sample_status' => $sampleStatus->value,
                     'batch_number' => $latestMeasurement->batch_number,
                     'progress' => $progress,
-                    'due_date' => $latestMeasurement->measured_at->format('Y-m-d H:i:s'),
+                    'due_date' => $latestMeasurement->due_date ? $latestMeasurement->due_date->format('Y-m-d H:i:s') : null,
                     'product' => [
                         'id' => $product->product_id,
                         'product_category_id' => $product->productCategory->id,
@@ -420,6 +433,7 @@ class ProductMeasurementController extends Controller
 
     /**
      * Bulk create measurements for multiple products
+     * Status awal TODO, batch_number tidak auto-generate
      */
     public function bulkStore(Request $request)
     {
@@ -432,7 +446,7 @@ class ProductMeasurementController extends Controller
             $validator = Validator::make($request->all(), [
                 'product_ids' => 'required|array|min:1',
                 'product_ids.*' => 'required|string|exists:products,product_id',
-                'due_date' => 'required|date|after_or_equal:today',
+                'due_date' => 'required|date',
                 'measurement_type' => 'required|in:FULL_MEASUREMENT,SCALE_MEASUREMENT',
             ]);
 
@@ -457,17 +471,17 @@ class ProductMeasurementController extends Controller
 
             $products = Product::whereIn('product_id', $request->product_ids)->get();
             foreach ($products as $product) {
-                $batchNumber = 'BATCH-' . date('Ymd') . '-' . strtoupper(substr(uniqid(), -6));
-
+                // Tidak auto-generate batch_number, akan di-set saat setBatchNumber dipanggil
                 $measurement = ProductMeasurement::create([
                     'product_id' => $product->id,
-                    'batch_number' => $batchNumber,
+                    'batch_number' => null, // Tidak auto-generate
                     'sample_count' => ($product->measurement_points[0]['setup']['sample_amount'] ?? 3),
                     'measurement_type' => $request->measurement_type,
-                    'status' => 'PENDING',
+                    'status' => 'TODO', // Status awal TODO
+                    'sample_status' => 'NOT_COMPLETE',
                     'measured_by' => $user->id,
-                    // measured_at sementara dipakai sebagai due_date
-                    'measured_at' => $request->due_date,
+                    'due_date' => $request->due_date,
+                    'measured_at' => null, // measured_at null sampai measurement selesai
                     'notes' => null,
                 ]);
 
@@ -486,7 +500,7 @@ class ProductMeasurementController extends Controller
     }
 
     /**
-     * Set batch number and move status to ONGOING (IN_PROGRESS)
+     * Set batch number and move status from TODO to IN_PROGRESS
      */
     public function setBatchNumber(Request $request, string $productMeasurementId)
     {
@@ -507,12 +521,17 @@ class ProductMeasurementController extends Controller
                 return $this->notFoundResponse('Product measurement tidak ditemukan');
             }
 
+            // Update batch_number dan status
             $measurement->update([
                 'batch_number' => $request->batch_number,
-                'status' => 'IN_PROGRESS',
+                'status' => 'IN_PROGRESS', // Status berubah dari TODO ke IN_PROGRESS
             ]);
 
-            return $this->successResponse(null, 'Batch number set successfully');
+            return $this->successResponse([
+                'measurement_id' => $measurement->measurement_id,
+                'batch_number' => $measurement->batch_number,
+                'status' => $measurement->status,
+            ], 'Batch number set successfully');
 
         } catch (\Exception $e) {
             return $this->errorResponse(
@@ -1264,41 +1283,34 @@ class ProductMeasurementController extends Controller
 
     /**
      * Get quarter range based on quarter number (1-4) and year
+     * Q1: Januari - Maret (1-3)
+     * Q2: April - Juni (4-6)
+     * Q3: Juli - September (7-9)
+     * Q4: Oktober - Desember (10-12)
      */
     private function getQuarterRangeFromQuarterNumber(int $quarter, int $year): array
     {
-        // Quarter ranges:
-        // Q1: Juni-Juli-Agustus (06-07-08)
-        // Q2: September-Oktober-November (09-10-11)
-        // Q3: Desember-Januari-Februari (12-01-02)
-        // Q4: Maret-April-Mei (03-04-05)
-        
         switch ($quarter) {
             case 1:
-                $startDate = $year . '-06-01 00:00:00';
-                $endDate = $year . '-08-31 23:59:59';
+                $startDate = $year . '-01-01 00:00:00';
+                $endDate = $year . '-03-31 23:59:59';
                 break;
             case 2:
-                $startDate = $year . '-09-01 00:00:00';
-                $endDate = $year . '-11-30 23:59:59';
+                $startDate = $year . '-04-01 00:00:00';
+                $endDate = $year . '-06-30 23:59:59';
                 break;
             case 3:
-                // Q3 crosses year boundary: Dec-Jan-Feb
-                $startDate = $year . '-12-01 00:00:00';
-                $endDate = ($year + 1) . '-02-28 23:59:59';
-                // Check for leap year
-                if (date('L', strtotime($year + 1 . '-01-01'))) {
-                    $endDate = ($year + 1) . '-02-29 23:59:59';
-                }
+                $startDate = $year . '-07-01 00:00:00';
+                $endDate = $year . '-09-30 23:59:59';
                 break;
             case 4:
-                $startDate = $year . '-03-01 00:00:00';
-                $endDate = $year . '-05-31 23:59:59';
+                $startDate = $year . '-10-01 00:00:00';
+                $endDate = $year . '-12-31 23:59:59';
                 break;
             default:
                 // Fallback to Q1
-                $startDate = $year . '-06-01 00:00:00';
-                $endDate = $year . '-08-31 23:59:59';
+                $startDate = $year . '-01-01 00:00:00';
+                $endDate = $year . '-03-31 23:59:59';
                 break;
         }
         
@@ -1311,6 +1323,10 @@ class ProductMeasurementController extends Controller
 
     /**
      * Get quarter range based on date
+     * Q1: Januari - Maret (1-3)
+     * Q2: April - Juni (4-6)
+     * Q3: Juli - September (7-9)
+     * Q4: Oktober - Desember (10-12)
      */
     private function getQuarterRange(string $date): array
     {
@@ -1318,33 +1334,27 @@ class ProductMeasurementController extends Controller
         $year = (int) date('Y', strtotime($date));
         
         $quarterRanges = [
-            'Q1' => ['06', '07', '08'],     // Juni-Juli-Agustus
-            'Q2' => ['09', '10', '11'],     // September-Oktober-November  
-            'Q3' => ['12', '01', '02'],     // Desember-Januari-Februari
-            'Q4' => ['03', '04', '05']      // Maret-April-Mei
+            'Q1' => ['01', '02', '03'],     // Januari - Maret
+            'Q2' => ['04', '05', '06'],     // April - Juni
+            'Q3' => ['07', '08', '09'],     // Juli - September
+            'Q4' => ['10', '11', '12']      // Oktober - Desember
         ];
         
         foreach ($quarterRanges as $quarter => $months) {
             if (in_array(sprintf('%02d', $month), $months)) {
                 // Determine quarter boundaries
                 if ($quarter === 'Q1') {
-                    $startDate = $year . '-06-01 00:00:00';
-                    $endDate = $year . '-08-31 23:59:59';
+                    $startDate = $year . '-01-01 00:00:00';
+                    $endDate = $year . '-03-31 23:59:59';
                 } elseif ($quarter === 'Q2') {
-                    $startDate = $year . '-09-01 00:00:00';
-                    $endDate = $year . '-11-30 23:59:59';
+                    $startDate = $year . '-04-01 00:00:00';
+                    $endDate = $year . '-06-30 23:59:59';
                 } elseif ($quarter === 'Q3') {
-                    // Handle year transition
-                    if (in_array($month, [12])) {
-                        $startDate = $year . '-12-01 00:00:00';
-                        $endDate = ($year + 1) . '-02-28 23:59:59';
-                    } else {
-                        $startDate = $year . '-01-01 00:00:00';
-                        $endDate = $year . '-02-28 23:59:59';
-                    }
+                    $startDate = $year . '-07-01 00:00:00';
+                    $endDate = $year . '-09-30 23:59:59';
                 } else { // Q4
-                    $startDate = $year . '-03-01 00:00:00';
-                    $endDate = $year . '-05-31 23:59:59';
+                    $startDate = $year . '-10-01 00:00:00';
+                    $endDate = $year . '-12-31 23:59:59';
                 }
                 
                 return [
@@ -1361,5 +1371,162 @@ class ProductMeasurementController extends Controller
             'end' => $year . '-12-31 23:59:59',
             'quarter' => 'Q1'
         ];
+    }
+
+    /**
+     * Delete product measurement (only if status is TODO)
+     * DELETE /api/v1/product-measurement/:id
+     */
+    public function destroy(string $productMeasurementId)
+    {
+        try {
+            $measurement = ProductMeasurement::where('measurement_id', $productMeasurementId)->first();
+
+            if (!$measurement) {
+                return $this->notFoundResponse('Product measurement tidak ditemukan');
+            }
+
+            // Validate hanya bisa delete jika status TODO
+            if ($measurement->status !== 'TODO') {
+                return $this->errorResponse(
+                    'Product measurement hanya bisa dihapus jika statusnya TODO',
+                    'DELETE_NOT_ALLOWED',
+                    400
+                );
+            }
+
+            $measurement->delete();
+
+            return $this->successResponse(
+                ['deleted' => true],
+                'Product measurement berhasil dihapus'
+            );
+
+        } catch (\Exception $e) {
+            return $this->errorResponse(
+                'Error deleting product measurement: ' . $e->getMessage(),
+                'DELETE_ERROR',
+                500
+            );
+        }
+    }
+
+    /**
+     * Update product measurement (only due_date can be updated)
+     * PUT/PATCH /api/v1/product-measurement/:id
+     */
+    public function update(Request $request, string $productMeasurementId)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'due_date' => 'required|date',
+            ]);
+
+            if ($validator->fails()) {
+                return $this->validationErrorResponse(
+                    $validator->errors(),
+                    'Request invalid'
+                );
+            }
+
+            $measurement = ProductMeasurement::where('measurement_id', $productMeasurementId)->first();
+
+            if (!$measurement) {
+                return $this->notFoundResponse('Product measurement tidak ditemukan');
+            }
+
+            // Update due_date
+            $measurement->update([
+                'due_date' => $request->due_date,
+            ]);
+
+            return $this->successResponse([
+                'measurement_id' => $measurement->measurement_id,
+                'due_date' => $measurement->due_date->format('Y-m-d H:i:s'),
+            ], 'Product measurement berhasil diupdate');
+
+        } catch (\Exception $e) {
+            return $this->errorResponse(
+                'Error updating product measurement: ' . $e->getMessage(),
+                'UPDATE_ERROR',
+                500
+            );
+        }
+    }
+
+    /**
+     * Get measurement progress for a quarter/year
+     * GET /api/v1/product-measurement/progress?quarter=4&year=2025
+     */
+    public function getProgress(Request $request)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'quarter' => 'required|integer|min:1|max:4',
+                'year' => 'required|integer|min:2020|max:2100',
+            ]);
+
+            if ($validator->fails()) {
+                return $this->validationErrorResponse(
+                    $validator->errors(),
+                    'Request invalid'
+                );
+            }
+
+            $quarter = $request->get('quarter');
+            $year = $request->get('year');
+
+            // Get quarter range
+            $quarterRange = $this->getQuarterRangeFromQuarterNumber($quarter, $year);
+
+            // Get all measurements in this quarter
+            $measurements = ProductMeasurement::whereBetween('due_date', [$quarterRange['start'], $quarterRange['end']])
+                ->whereNotNull('due_date')
+                ->get();
+
+            // Calculate progress
+            $totalProducts = $measurements->count();
+            $ok = 0;
+            $needToMeasure = 0;
+            $ongoing = 0;
+            $notChecked = 0;
+
+            foreach ($measurements as $measurement) {
+                $productStatus = $this->determineProductStatus($measurement);
+                
+                switch ($productStatus) {
+                    case 'OK':
+                        $ok++;
+                        break;
+                    case 'NEED_TO_MEASURE':
+                        $needToMeasure++;
+                        break;
+                    case 'ONGOING':
+                        $ongoing++;
+                        break;
+                    case 'TODO':
+                    default:
+                        $notChecked++;
+                        break;
+                }
+            }
+
+            return $this->successResponse([
+                'progress' => [
+                    'total_products' => $totalProducts,
+                    'ok' => $ok,
+                    'need_to_measure_again' => $needToMeasure,
+                    'ongoing' => $ongoing,
+                    'not_checked' => $notChecked,
+                ]
+            ], 'Progress retrieved successfully');
+
+        } catch (\Exception $e) {
+            return $this->errorResponse(
+                'Error getting progress: ' . $e->getMessage(),
+                'PROGRESS_ERROR',
+                500
+            );
+        }
     }
 }

@@ -50,6 +50,8 @@ Route::prefix('v1')->group(function () {
 
         // Product Measurement routes - available for authenticated users
         Route::prefix('product-measurement')->group(function () {
+            // Progress endpoint - must be before /{productMeasurementId}
+            Route::get('/progress', [ProductMeasurementController::class, 'getProgress']);
             Route::get('/available-products', [ProductMeasurementController::class, 'getAvailableProducts']);
             Route::post('/', [ProductMeasurementController::class, 'store']);
             Route::post('/bulk', [ProductMeasurementController::class, 'bulkStore']);
@@ -59,6 +61,8 @@ Route::prefix('v1')->group(function () {
             Route::post('/{productMeasurementId}/save-progress', [ProductMeasurementController::class, 'saveProgress']);
             Route::post('/{productMeasurementId}/create-sample-product', [ProductMeasurementController::class, 'createSampleProduct']);
             Route::get('/{productMeasurementId}', [ProductMeasurementController::class, 'show']);
+            Route::put('/{productMeasurementId}', [ProductMeasurementController::class, 'update']);
+            Route::delete('/{productMeasurementId}', [ProductMeasurementController::class, 'destroy']);
             Route::get('/', [ProductMeasurementController::class, 'index']);
         });
 

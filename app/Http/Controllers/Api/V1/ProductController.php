@@ -73,10 +73,10 @@ class ProductController extends Controller
                 'measurement_points.*.rule_evaluation_setting.tolerance_minus' => 'required_if:measurement_points.*.rule_evaluation_setting.rule,BETWEEN|nullable|numeric',
                 'measurement_points.*.rule_evaluation_setting.tolerance_plus' => 'required_if:measurement_points.*.rule_evaluation_setting.rule,BETWEEN|nullable|numeric',
 
-                // Measurement Groups
+                // Measurement Groups - group_name nullable untuk sorting single item
                 'measurement_groups' => 'nullable|array',
-                'measurement_groups.*.group_name' => 'nullable|string', // Optional: null for standalone items
-                'measurement_groups.*.measurement_items' => 'required_with:measurement_groups|array|min:1',
+                'measurement_groups.*.group_name' => 'nullable|string', // Nullable: single item tanpa group name untuk sorting
+                'measurement_groups.*.measurement_items' => 'required_with:measurement_groups|array',
                 'measurement_groups.*.order' => 'required_with:measurement_groups|integer',
             ]);
 
@@ -299,12 +299,23 @@ class ProductController extends Controller
             $page = $request->input('page', 1);
             $limit = $request->input('limit', 10);
             $productCategoryId = $request->input('product_category_id');
+            $searchQuery = $request->input('query');
 
             $query = Product::with(['quarter', 'productCategory']);
 
             // Filter by product_category_id if provided
             if ($productCategoryId) {
                 $query->where('product_category_id', $productCategoryId);
+            }
+
+            // Search filter
+            if ($searchQuery) {
+                $query->where(function($q) use ($searchQuery) {
+                    $q->where('product_name', 'like', "%{$searchQuery}%")
+                      ->orWhere('product_id', 'like', "%{$searchQuery}%")
+                      ->orWhere('article_code', 'like', "%{$searchQuery}%")
+                      ->orWhere('ref_spec_number', 'like', "%{$searchQuery}%");
+                });
             }
 
             $products = $query->paginate($limit, ['*'], 'page', $page);
@@ -477,10 +488,10 @@ class ProductController extends Controller
                 'measurement_points.*.rule_evaluation_setting.tolerance_minus' => 'required_if:measurement_points.*.rule_evaluation_setting.rule,BETWEEN|nullable|numeric',
                 'measurement_points.*.rule_evaluation_setting.tolerance_plus' => 'required_if:measurement_points.*.rule_evaluation_setting.rule,BETWEEN|nullable|numeric',
 
-                // Measurement Groups
+                // Measurement Groups - group_name nullable untuk sorting single item
                 'measurement_groups' => 'nullable|array',
-                'measurement_groups.*.group_name' => 'nullable|string', // Optional: null for standalone items
-                'measurement_groups.*.measurement_items' => 'required_with:measurement_groups|array|min:1',
+                'measurement_groups.*.group_name' => 'nullable|string', // Nullable: single item tanpa group name untuk sorting
+                'measurement_groups.*.measurement_items' => 'required_with:measurement_groups|array',
                 'measurement_groups.*.order' => 'required_with:measurement_groups|integer',
             ]);
 

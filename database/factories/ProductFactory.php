@@ -22,7 +22,7 @@ class ProductFactory extends Factory
     public function definition(): array
     {
         return [
-            'quarter_id' => Quarter::factory(),
+            'quarter_id' => null, // Quarter is nullable - only for measurement results
             'product_category_id' => ProductCategory::factory(),
             'product_name' => $this->faker->randomElement(['VO', 'COT', 'CAVS', 'CIVUS']),
             'ref_spec_number' => 'SPEC-' . strtoupper($this->faker->lexify('???-###')),

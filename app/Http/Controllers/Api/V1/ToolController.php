@@ -155,6 +155,7 @@ class ToolController extends Controller
                 'tool_model' => 'required|string|max:255',
                 'tool_type' => ['required', new Enum(ToolType::class)],
                 'last_calibration_at' => 'nullable|date',
+                'next_calibration_at' => 'nullable|date',
                 'imei' => 'required|string|max:255|unique:tools,imei',
                 'status' => ['nullable', new Enum(ToolStatus::class)],
             ]);
@@ -169,6 +170,7 @@ class ToolController extends Controller
                 'tool_model' => $request->input('tool_model'),
                 'tool_type' => $request->input('tool_type'),
                 'last_calibration_at' => $request->input('last_calibration_at'),
+                'next_calibration_at' => $request->input('next_calibration_at'),
                 'imei' => $request->input('imei'),
                 'status' => $request->input('status', 'ACTIVE'),
             ]);
@@ -218,6 +220,7 @@ class ToolController extends Controller
                 'tool_model' => 'nullable|string|max:255',
                 'tool_type' => ['nullable', new Enum(ToolType::class)],
                 'last_calibration_at' => 'nullable|date',
+                'next_calibration_at' => 'nullable|date',
                 'imei' => 'nullable|string|max:255|unique:tools,imei,' . $id,
                 'status' => ['nullable', new Enum(ToolStatus::class)],
             ]);
@@ -238,7 +241,9 @@ class ToolController extends Controller
             }
             if ($request->has('last_calibration_at')) {
                 $tool->last_calibration_at = $request->input('last_calibration_at');
-                // next_calibration_at akan otomatis terupdate oleh model boot method
+            }
+            if ($request->has('next_calibration_at')) {
+                $tool->next_calibration_at = $request->input('next_calibration_at');
             }
             if ($request->has('imei')) {
                 $tool->imei = $request->input('imei');

@@ -58,26 +58,35 @@ class Quarter extends Model
 
     /**
      * Generate quarters untuk tahun tertentu
+     * Q1: Januari - Maret (1-3)
+     * Q2: April - Juni (4-6)
+     * Q3: Juli - September (7-9)
+     * Q4: Oktober - Desember (10-12)
      */
     public static function generateQuartersForYear(int $year): void
     {
         $quarters = [
-            ['name' => 'Q1', 'start_month' => 1, 'end_month' => 3],
-            ['name' => 'Q2', 'start_month' => 4, 'end_month' => 6],
-            ['name' => 'Q3', 'start_month' => 7, 'end_month' => 9],
-            ['name' => 'Q4', 'start_month' => 10, 'end_month' => 12],
+            ['name' => 'Q1', 'start_month' => 1, 'end_month' => 3],   // Januari - Maret
+            ['name' => 'Q2', 'start_month' => 4, 'end_month' => 6],   // April - Juni
+            ['name' => 'Q3', 'start_month' => 7, 'end_month' => 9],   // Juli - September
+            ['name' => 'Q4', 'start_month' => 10, 'end_month' => 12], // Oktober - Desember
         ];
 
         foreach ($quarters as $quarter) {
-            self::updateOrCreate(
-                ['year' => $year, 'name' => $quarter['name']],
-                [
-                    'start_month' => $quarter['start_month'],
-                    'end_month' => $quarter['end_month'],
-                    'start_date' => Carbon::createFromDate($year, $quarter['start_month'], 1),
-                    'end_date' => Carbon::createFromDate($year, $quarter['end_month'], 1)->endOfMonth(),
-                ]
-            );
+            // Skip if already exists
+            if (self::where('year', $year)->where('name', $quarter['name'])->exists()) {
+                continue;
+            }
+            
+            self::create([
+                'year' => $year,
+                'name' => $quarter['name'],
+                'start_month' => $quarter['start_month'],
+                'end_month' => $quarter['end_month'],
+                'start_date' => Carbon::createFromDate($year, $quarter['start_month'], 1),
+                'end_date' => Carbon::createFromDate($year, $quarter['end_month'], 1)->endOfMonth(),
+                'is_active' => false,
+            ]);
         }
     }
 

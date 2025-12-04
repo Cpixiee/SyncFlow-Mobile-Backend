@@ -29,26 +29,15 @@ class Tool extends Model
     ];
 
     /**
-     * Boot method untuk auto-update next_calibration_at
+     * Boot method untuk auto-generate tool ID
+     * Note: next_calibration_at tidak auto-fill, bisa nullable
      */
     protected static function boot()
     {
         parent::boot();
 
-        // Auto update next_calibration_at saat updating
-        static::updating(function ($tool) {
-            // Jika last_calibration_at diubah, otomatis update next_calibration_at (1 tahun dari last_calibration_at)
-            if ($tool->isDirty('last_calibration_at') && $tool->last_calibration_at) {
-                $tool->next_calibration_at = $tool->last_calibration_at->copy()->addYear();
-            }
-        });
-
-        // Set next_calibration_at saat creating
-        static::creating(function ($tool) {
-            if ($tool->last_calibration_at && !$tool->next_calibration_at) {
-                $tool->next_calibration_at = $tool->last_calibration_at->copy()->addYear();
-            }
-        });
+        // Tidak ada auto-fill untuk next_calibration_at
+        // User harus set manual jika diperlukan
     }
 
     /**
