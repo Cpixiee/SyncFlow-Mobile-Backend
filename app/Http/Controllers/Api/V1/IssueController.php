@@ -495,5 +495,69 @@ class IssueController extends Controller
             }
         }
     }
+
+    /**
+     * Get issue tracking progress for dashboard
+     * GET /api/v1/issue-tracking/progress?quarter=3&year=2025
+     * 
+     * Response format:
+     * {
+     *   "solved": 10,
+     *   "in_progress": 5,
+     *   "pending": 3
+     * }
+     */
+    public function getProgress(Request $request)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'quarter' => 'required|integer|min:1|max:4',
+                'year' => 'required|integer|min:2020|max:2100',
+            ]);
+
+            if ($validator->fails()) {
+                return $this->validationErrorResponse($validator->errors());
+            }
+
+            $quarter = $request->get('quarter');
+            $year = $request->get('year');
+
+            // Calculate quarter date range
+            $quarterRanges = [
+                1 => ['01-01', '03-31'], // Q1: Jan-Mar
+                2 => ['04-01', '06-30'], // Q2: Apr-Jun
+                3 => ['07-01', '09-30'], // Q3: Jul-Sep
+                4 => ['10-01', '12-31'], // Q4: Oct-Dec
+            ];
+
+            $startDate = $year . '-' . $quarterRanges[$quarter][0];
+            $endDate = $year . '-' . $quarterRanges[$quarter][1];
+
+            // Get issues created in this quarter (based on due_date or created_at)
+            // Using due_date if available, otherwise created_at
+            $issues = Issue::where(function($query) use ($startDate, $endDate) {
+                $query->whereBetween('due_date', [$startDate, $endDate])
+                      ->orWhereBetween('created_at', [$startDate, $endDate]);
+            })->get();
+
+            // Count by status
+            $solved = $issues->where('status', IssueStatus::SOLVED)->count();
+            $inProgress = $issues->where('status', IssueStatus::ON_GOING)->count();
+            $pending = $issues->where('status', IssueStatus::PENDING)->count();
+
+            return $this->successResponse([
+                'solved' => $solved,
+                'in_progress' => $inProgress,
+                'pending' => $pending,
+            ], 'Issue tracking progress retrieved successfully');
+
+        } catch (\Exception $e) {
+            return $this->errorResponse(
+                'Error getting issue tracking progress: ' . $e->getMessage(),
+                'ISSUE_PROGRESS_ERROR',
+                500
+            );
+        }
+    }
 }
 

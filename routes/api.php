@@ -50,8 +50,10 @@ Route::prefix('v1')->group(function () {
 
         // Product Measurement routes - available for authenticated users
         Route::prefix('product-measurement')->group(function () {
-            // Progress endpoint - must be before /{productMeasurementId}
+            // Progress endpoints - must be before /{productMeasurementId}
             Route::get('/progress', [ProductMeasurementController::class, 'getProgress']);
+            Route::get('/progress-category', [ProductMeasurementController::class, 'getProgressCategory']);
+            Route::get('/progress-all', [ProductMeasurementController::class, 'getProgressAll']);
             Route::get('/available-products', [ProductMeasurementController::class, 'getAvailableProducts']);
             Route::post('/', [ProductMeasurementController::class, 'store']);
             Route::post('/bulk', [ProductMeasurementController::class, 'bulkStore']);
@@ -129,6 +131,11 @@ Route::prefix('v1')->group(function () {
                 Route::put('/{id}', [IssueController::class, 'update']);
                 Route::delete('/{id}', [IssueController::class, 'destroy']);
             });
+        });
+
+        // Issue Tracking Progress - available for authenticated users
+        Route::prefix('issue-tracking')->group(function () {
+            Route::get('/progress', [IssueController::class, 'getProgress']);
         });
 
         // SuperAdmin only routes

@@ -1529,4 +1529,206 @@ class ProductMeasurementController extends Controller
             );
         }
     }
+
+    /**
+     * Get progress per category for dashboard
+     * GET /api/v1/product-measurement/progress-category?quarter=3&year=2025
+     * 
+     * Response format:
+     * {
+     *   "perCategory": [
+     *     {
+     *       "category_id": 1,
+     *       "category_name": "Tube Test",
+     *       "product_result": {
+     *         "ok": 25,
+     *         "ng": 10,
+     *         "total": 50
+     *       },
+     *       "product_checking": {
+     *         "todo": 15,
+     *         "checked": 25,
+     *         "done": 40,
+     *         "total": 50
+     *       }
+     *     }
+     *   ]
+     * }
+     */
+    public function getProgressCategory(Request $request)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'quarter' => 'required|integer|min:1|max:4',
+                'year' => 'required|integer|min:2020|max:2100',
+            ]);
+
+            if ($validator->fails()) {
+                return $this->validationErrorResponse(
+                    $validator->errors(),
+                    'Request invalid'
+                );
+            }
+
+            $quarter = $request->get('quarter');
+            $year = $request->get('year');
+
+            // Get quarter range
+            $quarterRange = $this->getQuarterRangeFromQuarterNumber($quarter, $year);
+
+            // Get all categories
+            $categories = \App\Models\ProductCategory::all();
+
+            $perCategory = [];
+
+            foreach ($categories as $category) {
+                // Get all products in this category
+                $products = Product::where('product_category_id', $category->id)->get();
+                
+                if ($products->isEmpty()) {
+                    continue; // Skip categories with no products
+                }
+
+                $productIds = $products->pluck('id')->toArray();
+
+                // Get measurements for these products in the quarter
+                $measurements = ProductMeasurement::whereIn('product_id', $productIds)
+                    ->whereBetween('due_date', [$quarterRange['start'], $quarterRange['end']])
+                    ->whereNotNull('due_date')
+                    ->get();
+
+                if ($measurements->isEmpty()) {
+                    continue; // Skip categories with no measurements in this quarter
+                }
+
+                // Calculate product_result (OK/NG)
+                $okCount = 0;
+                $ngCount = 0;
+
+                // Calculate product_checking (TODO/checked/done)
+                $todoCount = 0;
+                $checkedCount = 0;
+                $doneCount = 0;
+
+                foreach ($measurements as $measurement) {
+                    // Product Result: OK vs NG
+                    if ($measurement->status === 'COMPLETED') {
+                        if ($measurement->overall_result) {
+                            $okCount++;
+                        } else {
+                            $ngCount++;
+                        }
+                    }
+
+                    // Product Checking: TODO vs CHECKED vs DONE
+                    if ($measurement->status === 'TODO' || $measurement->batch_number === null) {
+                        $todoCount++;
+                    } elseif ($measurement->status === 'IN_PROGRESS') {
+                        $checkedCount++; // Ongoing/In Progress = being checked
+                    } elseif ($measurement->status === 'COMPLETED') {
+                        $doneCount++; // Completed = done checking
+                    } elseif ($measurement->status === 'PENDING') {
+                        $checkedCount++; // Pending = checked, waiting for action
+                    }
+                }
+
+                $totalProducts = $measurements->count();
+
+                $perCategory[] = [
+                    'category_id' => $category->id,
+                    'category_name' => $category->name,
+                    'product_result' => [
+                        'ok' => $okCount,
+                        'ng' => $ngCount,
+                        'total' => $totalProducts,
+                    ],
+                    'product_checking' => [
+                        'todo' => $todoCount,
+                        'checked' => $checkedCount,
+                        'done' => $doneCount,
+                        'total' => $totalProducts,
+                    ],
+                ];
+            }
+
+            return $this->successResponse([
+                'perCategory' => $perCategory,
+            ], 'Progress per category retrieved successfully');
+
+        } catch (\Exception $e) {
+            return $this->errorResponse(
+                'Error getting progress per category: ' . $e->getMessage(),
+                'PROGRESS_CATEGORY_ERROR',
+                500
+            );
+        }
+    }
+
+    /**
+     * Get overall progress for all product measurements
+     * GET /api/v1/product-measurement/progress-all?quarter=3&year=2025
+     * 
+     * Response format:
+     * {
+     *   "done": 25,
+     *   "ongoing": 10,
+     *   "backlog": 15
+     * }
+     */
+    public function getProgressAll(Request $request)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'quarter' => 'required|integer|min:1|max:4',
+                'year' => 'required|integer|min:2020|max:2100',
+            ]);
+
+            if ($validator->fails()) {
+                return $this->validationErrorResponse(
+                    $validator->errors(),
+                    'Request invalid'
+                );
+            }
+
+            $quarter = $request->get('quarter');
+            $year = $request->get('year');
+
+            // Get quarter range
+            $quarterRange = $this->getQuarterRangeFromQuarterNumber($quarter, $year);
+
+            // Get all measurements in this quarter
+            $measurements = ProductMeasurement::whereBetween('due_date', [$quarterRange['start'], $quarterRange['end']])
+                ->whereNotNull('due_date')
+                ->get();
+
+            // Calculate progress
+            $done = 0;
+            $ongoing = 0;
+            $backlog = 0;
+
+            foreach ($measurements as $measurement) {
+                if ($measurement->status === 'COMPLETED') {
+                    $done++;
+                } elseif ($measurement->status === 'IN_PROGRESS' || $measurement->status === 'PENDING') {
+                    $ongoing++;
+                } else {
+                    // TODO or other status = backlog
+                    $backlog++;
+                }
+            }
+
+            return $this->successResponse([
+                'done' => $done,
+                'ongoing' => $ongoing,
+                'backlog' => $backlog,
+            ], 'Overall progress retrieved successfully');
+
+        } catch (\Exception $e) {
+            return $this->errorResponse(
+                'Error getting overall progress: ' . $e->getMessage(),
+                'PROGRESS_ALL_ERROR',
+                500
+            );
+        }
+    }
 }
