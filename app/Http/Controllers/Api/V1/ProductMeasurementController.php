@@ -545,6 +545,9 @@ class ProductMeasurementController extends Controller
     /**
      * Check samples for a specific measurement item (for individual measurement item evaluation)
      */
+    /**
+     * Check samples for a single measurement item
+     */
     public function checkSamples(Request $request, string $productMeasurementId)
     {
         try {
@@ -590,18 +593,6 @@ class ProductMeasurementController extends Controller
                     ], 'Waiting for derived data');
             }
 
-            // Check if measurement item with formula dependencies needs prerequisite data
-            if (isset($measurementPoint['variables']) && !empty($measurementPoint['variables'])) {
-                $missingDependencies = $this->checkFormulaDependencies($measurement, $measurementPoint['variables']);
-                if (!empty($missingDependencies)) {
-                    return $this->errorResponse(
-                        "Measurement item ini membutuhkan data dari: " . implode(', ', $missingDependencies) . ". Silakan input data tersebut terlebih dahulu.",
-                        'MISSING_DEPENDENCIES',
-                        400
-                    );
-                }
-            }
-
             // Validate request
             $validator = Validator::make($request->all(), [
                 'measurement_item_name_id' => 'required|string',
@@ -624,26 +615,29 @@ class ProductMeasurementController extends Controller
                 );
             }
 
+            // Get variable values from FE or from saved measurement_results
+            $variableValues = $request->variable_values ?? [];
+            
+            // If variable_values not provided by FE, try to get from saved measurement_results
+            if (empty($variableValues) && isset($measurementPoint['variables'])) {
+                $variableValues = $this->extractVariableValuesFromSavedResults($measurement, $measurementPoint['variables']);
+            }
+
             // Process single measurement item
             $measurementItemData = [
                 'measurement_item_name_id' => $request->measurement_item_name_id,
-                'variable_values' => $request->variable_values ?? [],
+                'variable_values' => $variableValues,
                 'samples' => $request->samples,
             ];
-
-            // Get product and measurement point
-            $product = $measurement->product;
-            $measurementPoint = $product->getMeasurementPointByNameId($request->measurement_item_name_id);
-            
-            if (!$measurementPoint) {
-                return $this->notFoundResponse("Measurement point tidak ditemukan: {$request->measurement_item_name_id}");
-            }
 
             // Process samples dengan variables dan pre-processing formulas
             $processedSamples = $this->processSampleItem($measurementItemData, $measurementPoint);
             
             // Evaluate berdasarkan evaluation type
             $result = $this->evaluateSampleItem($processedSamples, $measurementPoint, $measurementItemData);
+
+            // ✅ Save hasil check sebagai "jejak" untuk comparison nanti
+            $this->saveLastCheckData($measurement, $request->measurement_item_name_id, $result);
 
             return $this->successResponse($result, 'Samples processed successfully');
 
@@ -654,6 +648,59 @@ class ProductMeasurementController extends Controller
                 500
             );
         }
+    }
+    
+    /**
+     * Extract variable values from saved measurement_results
+     */
+    private function extractVariableValuesFromSavedResults(ProductMeasurement $measurement, array $variables): array
+    {
+        $variableValues = [];
+        $savedResults = $measurement->measurement_results ?? [];
+        
+        foreach ($variables as $variable) {
+            if ($variable['type'] === 'FORMULA' && isset($variable['formula'])) {
+                // Extract measurement_item_name_id from formula
+                // Example: AVG(thickness_a_measurement) -> thickness_a_measurement
+                preg_match_all('/AVG\(([^)]+)\)|MIN\(([^)]+)\)|MAX\(([^)]+)\)|([a-z_]+)/i', $variable['formula'], $matches);
+                
+                // Find all referenced measurement items
+                $referencedItems = array_filter(array_merge($matches[1], $matches[2], $matches[3], $matches[4]));
+                $referencedItems = array_unique($referencedItems);
+                
+                foreach ($referencedItems as $refItem) {
+                    if (empty($refItem) || in_array(strtolower($refItem), ['avg', 'min', 'max'])) {
+                        continue;
+                    }
+                    
+                    // Find this measurement item in saved results
+                    foreach ($savedResults as $savedResult) {
+                        if ($savedResult['measurement_item_name_id'] === $refItem) {
+                            // Calculate average from samples
+                            $values = [];
+                            if (isset($savedResult['samples'])) {
+                                foreach ($savedResult['samples'] as $sample) {
+                                    if (isset($sample['single_value']) && is_numeric($sample['single_value'])) {
+                                        $values[] = $sample['single_value'];
+                                    }
+                                }
+                            }
+                            
+                            if (!empty($values)) {
+                                $avgValue = array_sum($values) / count($values);
+                                $variableValues[] = [
+                                    'name_id' => $refItem,
+                                    'value' => $avgValue
+                                ];
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        
+        return $variableValues;
     }
 
     /**
@@ -786,17 +833,73 @@ class ProductMeasurementController extends Controller
         
         // Process joint formulas
         $jointResults = [];
+        $executor = new \NXP\MathExecutor();
+        
+        // Register custom functions
+        $this->registerCustomFunctionsForItem($executor);
+        
+        // Extract all pre_processing_formula_values from samples untuk aggregation
+        $aggregatedValues = [];
+        foreach ($processedSamples as $sample) {
+            if (isset($sample['pre_processing_formula_values'])) {
+                foreach ($sample['pre_processing_formula_values'] as $formulaValue) {
+                    $name = $formulaValue['name'];
+                    if (!isset($aggregatedValues[$name])) {
+                        $aggregatedValues[$name] = [];
+                    }
+                    // Only aggregate non-null values
+                    if ($formulaValue['value'] !== null && is_numeric($formulaValue['value'])) {
+                        $aggregatedValues[$name][] = $formulaValue['value'];
+                    }
+                }
+            }
+        }
+        
+        // Set aggregated values as variables (as arrays for avg/min/max functions)
+        foreach ($aggregatedValues as $name => $values) {
+            $executor->setVar($name, $values);
+        }
+        
+        // Execute each joint formula
         foreach ($jointSetting['formulas'] as $formula) {
-            $jointResults[] = [
-                'name' => $formula['name'],
-                'formula' => $formula['formula'],
-                'is_final_value' => $formula['is_final_value'],
-                'value' => null // Will be calculated by frontend or provided in submission
-            ];
+            try {
+                $result = $executor->execute($formula['formula']);
+                $jointResults[] = [
+                    'name' => $formula['name'],
+                    'formula' => $formula['formula'],
+                    'is_final_value' => $formula['is_final_value'],
+                    'value' => $result
+                ];
+                
+                // Set result untuk formula berikutnya
+                $executor->setVar($formula['name'], $result);
+            } catch (\Exception $e) {
+                // If formula fails (missing variable), return null
+                $jointResults[] = [
+                    'name' => $formula['name'],
+                    'formula' => $formula['formula'],
+                    'is_final_value' => $formula['is_final_value'],
+                    'value' => null
+                ];
+            }
         }
 
         $result['joint_setting_formula_values'] = $jointResults;
-        $result['status'] = true; // For now, assume OK until actual calculation
+        
+        // Evaluate status based on rule if there's a final value
+        $finalValue = null;
+        foreach ($jointResults as $jointResult) {
+            if ($jointResult['is_final_value'] && $jointResult['value'] !== null) {
+                $finalValue = $jointResult['value'];
+                break;
+            }
+        }
+        
+        if ($finalValue !== null) {
+            $result['status'] = $this->evaluateWithRuleItem($finalValue, $ruleEvaluation);
+        } else {
+            $result['status'] = null; // Can't evaluate yet
+        }
         
         return $result;
     }
@@ -842,12 +945,79 @@ class ProductMeasurementController extends Controller
     private function processPreProcessingFormulasForItem(array $formulas, array $rawValues, array $variables): array
     {
         $results = [];
-        // For now, return placeholder values
-        // In real implementation, this would use MathExecutor like in the main processing
-        foreach ($formulas as $formula) {
-            $results[] = 0.0; // Placeholder
+        $executor = new \NXP\MathExecutor();
+        
+        // Register custom functions
+        $this->registerCustomFunctionsForItem($executor);
+        
+        // Set raw values as variables
+        foreach ($rawValues as $key => $value) {
+            if (is_numeric($value)) {
+                $executor->setVar($key, $value);
+            } elseif (is_array($value)) {
+                foreach ($value as $subKey => $subValue) {
+                    if (is_numeric($subValue)) {
+                        $executor->setVar($subKey, $subValue);
+                    }
+                }
+            }
         }
+        
+        // Set variable values as variables
+        foreach ($variables as $variable) {
+            if (is_numeric($variable['value'])) {
+                $executor->setVar($variable['name_id'], $variable['value']);
+            }
+        }
+        
+        // Execute each formula
+        foreach ($formulas as $formula) {
+            try {
+                $result = $executor->execute($formula['formula']);
+                $results[] = $result;
+                
+                // Set result untuk formula berikutnya
+                $executor->setVar($formula['name'], $result);
+            } catch (\Exception $e) {
+                // If formula fails (missing variable), return null instead of 0
+                $results[] = null;
+            }
+        }
+        
         return $results;
+    }
+    
+    /**
+     * Register custom functions for formula execution
+     */
+    private function registerCustomFunctionsForItem($executor): void
+    {
+        // Register AVG function for aggregation
+        $executor->addFunction('avg', function($values) {
+            if (is_array($values)) {
+                $numericValues = array_filter($values, 'is_numeric');
+                return count($numericValues) > 0 ? array_sum($numericValues) / count($numericValues) : null;
+            }
+            return is_numeric($values) ? $values : null;
+        });
+        
+        // Register MIN function
+        $executor->addFunction('min', function($values) {
+            if (is_array($values)) {
+                $numericValues = array_filter($values, 'is_numeric');
+                return count($numericValues) > 0 ? min($numericValues) : null;
+            }
+            return is_numeric($values) ? $values : null;
+        });
+        
+        // Register MAX function
+        $executor->addFunction('max', function($values) {
+            if (is_array($values)) {
+                $numericValues = array_filter($values, 'is_numeric');
+                return count($numericValues) > 0 ? max($numericValues) : null;
+            }
+            return is_numeric($values) ? $values : null;
+        });
     }
 
     /**
@@ -970,8 +1140,18 @@ class ProductMeasurementController extends Controller
             $validator = Validator::make($request->all(), [
                 'measurement_results' => 'required|array|min:1',
                 'measurement_results.*.measurement_item_name_id' => 'required|string',
-                'measurement_results.*.samples' => 'nullable|array',
+                'measurement_results.*.status' => 'nullable|boolean',
                 'measurement_results.*.variable_values' => 'nullable|array',
+                'measurement_results.*.variable_values.*.name_id' => 'required_with:measurement_results.*.variable_values|string',
+                'measurement_results.*.variable_values.*.value' => 'required_with:measurement_results.*.variable_values',
+                'measurement_results.*.samples' => 'nullable|array',
+                'measurement_results.*.samples.*.sample_index' => 'required_with:measurement_results.*.samples|integer',
+                'measurement_results.*.samples.*.status' => 'nullable|boolean',
+                'measurement_results.*.samples.*.single_value' => 'nullable|numeric',
+                'measurement_results.*.samples.*.before_after_value' => 'nullable|array',
+                'measurement_results.*.samples.*.qualitative_value' => 'nullable|boolean',
+                'measurement_results.*.samples.*.pre_processing_formula_values' => 'nullable|array',
+                'measurement_results.*.joint_setting_formula_values' => 'nullable|array',
             ]);
 
             if ($validator->fails()) {
@@ -981,26 +1161,186 @@ class ProductMeasurementController extends Controller
                 );
             }
 
-            // Save partial results
+            // Get existing results
             $existingResults = $measurement->measurement_results ?? [];
+            $lastCheckData = $measurement->last_check_data ?? [];  // ✅ Jejak terakhir dari /samples/check
             $newResults = $request->measurement_results;
-
-            // Merge with existing results
+            
+            // Build lookup for existing results by measurement_item_name_id
+            $existingResultsMap = [];
+            foreach ($existingResults as $key => $result) {
+                $existingResultsMap[$result['measurement_item_name_id']] = [
+                    'key' => $key,
+                    'data' => $result
+                ];
+            }
+            
+            // Track which items changed and which need re-check
+            $changedItems = [];
+            $needReCheckItems = []; // Level 1: Raw data changed but not re-checked
+            
+            // Merge new results with existing
             foreach ($newResults as $newResult) {
-                $found = false;
-                foreach ($existingResults as &$existingResult) {
-                    if ($existingResult['measurement_item_name_id'] === $newResult['measurement_item_name_id']) {
-                        $existingResult = array_merge($existingResult, $newResult);
-                        $found = true;
+                $itemNameId = $newResult['measurement_item_name_id'];
+                $newSamples = $newResult['samples'] ?? [];
+                
+                // ✅ Compare dengan LAST CHECK DATA (jejak), bukan dengan saved results
+                $lastCheckSamples = isset($lastCheckData[$itemNameId]) 
+                    ? ($lastCheckData[$itemNameId]['samples'] ?? [])
+                    : [];
+                
+                // If no last check data, compare with existing saved results
+                if (empty($lastCheckSamples) && isset($existingResultsMap[$itemNameId])) {
+                    $lastCheckSamples = $existingResultsMap[$itemNameId]['data']['samples'] ?? [];
+                }
+                
+                // Check if samples data changed
+                $samplesChanged = false;
+                if (!empty($lastCheckSamples)) {
+                    $samplesChanged = $this->samplesDataChanged($lastCheckSamples, $newSamples);
+                }
+                
+                if ($samplesChanged) {
+                    // Raw data changed!
+                    
+                    // Check if user already re-checked (hit /samples/check)
+                    // Look for fresh data in last_check_data with recent timestamp
+                    $hasRecentCheck = false;
+                    if (isset($lastCheckData[$itemNameId]['checked_at'])) {
+                        $lastCheckedAt = \Carbon\Carbon::parse($lastCheckData[$itemNameId]['checked_at']);
+                        $timeDiff = $lastCheckedAt->diffInMinutes(now());
+                        
+                        // If last check was recent (< 5 minutes) AND samples match new data
+                        if ($timeDiff < 5) {
+                            $lastCheckSamplesRecent = $lastCheckData[$itemNameId]['samples'] ?? [];
+                            // Compare new samples with last check samples
+                            if (!$this->samplesDataChanged($lastCheckSamplesRecent, $newSamples)) {
+                                // Samples match last check → user already validated
+                                $hasRecentCheck = true;
+                            }
+                        }
+                    }
+                    
+                    if (!$hasRecentCheck) {
+                        // 🔴 Level 1 Warning: Raw data changed but not re-checked
+                        $needReCheckItems[] = $itemNameId;
+                    } else {
+                        // ✅ User already re-checked, mark as changed for Level 2
+                        $changedItems[] = $itemNameId;
+                    }
+                } else {
+                    // No change in samples, but might have been recently checked
+                    // (useful for items without sample changes but dependency updates)
+                }
+                
+                // Update or add result
+                if (isset($existingResultsMap[$itemNameId])) {
+                    $key = $existingResultsMap[$itemNameId]['key'];
+                    $oldData = $existingResultsMap[$itemNameId]['data'];
+                    
+                    // Update existing result
+                    $existingResults[$key] = [
+                        'measurement_item_name_id' => $itemNameId,
+                        'status' => $newResult['status'] ?? null,
+                        'variable_values' => $newResult['variable_values'] ?? [],
+                        'samples' => $newSamples,
+                        'joint_setting_formula_values' => $newResult['joint_setting_formula_values'] ?? null,
+                        'created_at' => $oldData['created_at'] ?? now()->toISOString(),
+                        'updated_at' => now()->toISOString(),
+                    ];
+                } else {
+                    // Check if this is a new item with last_check_data
+                    if (isset($lastCheckData[$itemNameId])) {
+                        // User checked but never saved, this is first save
+                        $changedItems[] = $itemNameId;
+                    }
+                    
+                    // Add new result
+                    $existingResults[] = [
+                        'measurement_item_name_id' => $itemNameId,
+                        'status' => $newResult['status'] ?? null,
+                        'variable_values' => $newResult['variable_values'] ?? [],
+                        'samples' => $newSamples,
+                        'joint_setting_formula_values' => $newResult['joint_setting_formula_values'] ?? null,
+                        'created_at' => now()->toISOString(),
+                        'updated_at' => now()->toISOString(),
+                    ];
+                }
+            }
+            
+            // Level 1 Validation: Check if any items need re-check (raw data changed but not validated)
+            // Build warnings for items that need re-check
+            $needReCheckWarnings = [];
+            foreach ($needReCheckItems as $itemNameId) {
+                // Get last check values and current values for comparison
+                $lastCheckValues = [];
+                $currentValues = [];
+                
+                if (isset($lastCheckData[$itemNameId]['samples'])) {
+                    foreach ($lastCheckData[$itemNameId]['samples'] as $sample) {
+                        if (isset($sample['single_value'])) {
+                            $lastCheckValues[] = $sample['single_value'];
+                        }
+                    }
+                }
+                
+                // Find current values in newResults
+                foreach ($newResults as $result) {
+                    if ($result['measurement_item_name_id'] === $itemNameId && isset($result['samples'])) {
+                        foreach ($result['samples'] as $sample) {
+                            if (isset($sample['single_value'])) {
+                                $currentValues[] = $sample['single_value'];
+                            }
+                        }
                         break;
                     }
                 }
-                if (!$found) {
-                    $existingResults[] = $newResult;
+                
+                $needReCheckWarnings[] = [
+                    'measurement_item_name_id' => $itemNameId,
+                    'level' => 'CRITICAL',
+                    'reason' => "Raw data berubah dari hasil check terakhir tetapi belum di-validate ulang",
+                    'action' => 'Silakan hit endpoint /samples/check untuk item ini terlebih dahulu',
+                    'last_check_values' => $lastCheckValues,
+                    'current_values' => $currentValues,
+                    'type' => 'RAW_DATA_CHANGED_NOT_VALIDATED'
+                ];
+            }
+            
+            // Level 2 Validation: Check if any dependent items need re-checking
+            $dependencyWarnings = $this->validateDependencies($measurement->product, $existingResults, $changedItems);
+
+            // Combine all warnings
+            $allWarnings = array_merge($needReCheckWarnings, $dependencyWarnings);
+            
+            // ✅ CHECK FIRST: If there are warnings, STOP and return error - DO NOT SAVE!
+            if (!empty($allWarnings)) {
+                // Categorize warnings
+                $criticalCount = count(array_filter($allWarnings, fn($w) => ($w['level'] ?? '') === 'CRITICAL'));
+                $dependencyCount = count($dependencyWarnings);
+                
+                $errorMessage = "Tidak dapat menyimpan progress karena ada data yang perlu di-validate ulang";
+                
+                if ($criticalCount > 0) {
+                    $errorMessage .= ": {$criticalCount} item dengan raw data berubah belum di-check ulang";
                 }
+                if ($dependencyCount > 0) {
+                    $errorMessage .= ($criticalCount > 0 ? ", " : ": ") . "{$dependencyCount} item terpengaruh perubahan dependency";
+                }
+                
+                return $this->errorResponse(
+                    $errorMessage,
+                    'VALIDATION_REQUIRED',
+                    400,
+                    [
+                        'warnings' => $allWarnings,
+                        'critical_count' => $criticalCount,
+                        'dependency_count' => $dependencyCount,
+                    ]
+                );
             }
 
-            // Update measurement with progress
+            // ✅ No warnings - SAFE TO SAVE!
             $measurement->update([
                 'status' => 'IN_PROGRESS',
                 'measurement_results' => $existingResults,
@@ -1009,13 +1349,15 @@ class ProductMeasurementController extends Controller
             // Calculate progress
             $progress = $this->calculateProgress($measurement);
 
-            return $this->successResponse([
+            $response = [
                 'measurement_id' => $measurement->measurement_id,
                 'status' => 'IN_PROGRESS',
                 'progress' => $progress,
                 'saved_items' => count($newResults),
-                'total_items' => count($existingResults),
-            ], 'Progress saved successfully');
+                'total_saved_items' => count($existingResults),
+            ];
+
+            return $this->successResponse($response, 'Progress saved successfully');
 
         } catch (\Exception $e) {
             return $this->errorResponse(
@@ -1730,5 +2072,201 @@ class ProductMeasurementController extends Controller
                 500
             );
         }
+    }
+    
+    /**
+     * Check if samples data has changed
+     */
+    private function samplesDataChanged(array $oldSamples, array $newSamples): bool
+    {
+        if (count($oldSamples) !== count($newSamples)) {
+            return true;
+        }
+        
+        // Compare sample values
+        foreach ($newSamples as $index => $newSample) {
+            if (!isset($oldSamples[$index])) {
+                return true;
+            }
+            
+            $oldSample = $oldSamples[$index];
+            
+            // Check single_value
+            if (isset($newSample['single_value']) && isset($oldSample['single_value'])) {
+                if ($newSample['single_value'] != $oldSample['single_value']) {
+                    return true;
+                }
+            }
+            
+            // Check before_after_value
+            if (isset($newSample['before_after_value']) && isset($oldSample['before_after_value'])) {
+                if (json_encode($newSample['before_after_value']) != json_encode($oldSample['before_after_value'])) {
+                    return true;
+                }
+            }
+            
+            // Check qualitative_value
+            if (isset($newSample['qualitative_value']) && isset($oldSample['qualitative_value'])) {
+                if ($newSample['qualitative_value'] != $oldSample['qualitative_value']) {
+                    return true;
+                }
+            }
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Validate dependencies - detect outdated dependent items
+     */
+    private function validateDependencies($product, array $savedResults, array $changedItems): array
+    {
+        $warnings = [];
+        
+        if (empty($changedItems)) {
+            return $warnings;
+        }
+        
+        // Get all measurement points
+        $measurementPoints = $product->measurement_points ?? [];
+        
+        // Track affected items (items that got warnings)
+        // This is needed for transitive/chain dependency detection
+        $affectedItems = $changedItems; // Start with changed items
+        
+        // Multiple passes to catch chain dependencies
+        // e.g., thickness_a changes → room_temp affected → fix_temp affected
+        $maxIterations = 10; // Prevent infinite loop
+        $iteration = 0;
+        $foundNewAffected = true;
+        
+        while ($foundNewAffected && $iteration < $maxIterations) {
+            $foundNewAffected = false;
+            $iteration++;
+            
+            // Check each saved result
+            foreach ($savedResults as $result) {
+                $itemNameId = $result['measurement_item_name_id'];
+                
+                // Skip if this item is already in affected list
+                if (in_array($itemNameId, $affectedItems)) {
+                    continue;
+                }
+                
+                // Find measurement point definition
+                $measurementPoint = null;
+                foreach ($measurementPoints as $mp) {
+                    if ($mp['measurement_item_name_id'] === $itemNameId) {
+                        $measurementPoint = $mp;
+                        break;
+                    }
+                }
+                
+                if (!$measurementPoint) {
+                    continue;
+                }
+                
+                // Collect all dependencies for this item
+                $allDependencies = [];
+                
+                // 1. Check variables (for pre-processing formulas)
+                if (isset($measurementPoint['variables']) && !empty($measurementPoint['variables'])) {
+                    foreach ($measurementPoint['variables'] as $variable) {
+                        if ($variable['type'] === 'FORMULA' && isset($variable['formula'])) {
+                            // Extract referenced measurement items from formula
+                            preg_match_all('/AVG\(([^)]+)\)|MIN\(([^)]+)\)|MAX\(([^)]+)\)|([a-z_]+)/i', $variable['formula'], $matches);
+                            $referencedItems = array_filter(array_merge($matches[1], $matches[2], $matches[3], $matches[4]));
+                            $allDependencies = array_merge($allDependencies, $referencedItems);
+                        }
+                    }
+                }
+                
+                // 2. Check joint setting (for aggregation formulas)
+                if (isset($measurementPoint['joint_setting'])) {
+                    $jointSetting = $measurementPoint['joint_setting'];
+                    
+                    // Check joint_setting_formula
+                    if (isset($jointSetting['joint_setting_formula']) && !empty($jointSetting['joint_setting_formula'])) {
+                        foreach ($jointSetting['joint_setting_formula'] as $jointFormula) {
+                            if (isset($jointFormula['formula'])) {
+                                // Extract variable names (e.g., CROSS_SECTION, FINAL_AVG)
+                                // These variables come from OTHER measurement items
+                                preg_match_all('/[A-Z_]+/', $jointFormula['formula'], $varMatches);
+                                foreach ($varMatches[0] as $varName) {
+                                    // Find which measurement item provides this variable
+                                    $sourceItem = $this->findMeasurementItemByVariableName($measurementPoints, $varName);
+                                    if ($sourceItem) {
+                                        $allDependencies[] = $sourceItem;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Remove duplicates and filter empty
+                $allDependencies = array_unique(array_filter($allDependencies, function ($dep) {
+                    return !empty($dep) && !in_array(strtolower($dep), ['avg', 'min', 'max', 'sum']);
+                }));
+                
+                // Check if any dependency is in affected list
+                $affectedDependencies = array_intersect($allDependencies, $affectedItems);
+                
+                if (!empty($affectedDependencies)) {
+                    // This item is affected by changed dependencies!
+                    $affectedItems[] = $itemNameId;
+                    $foundNewAffected = true;
+                    
+                    $warnings[] = [
+                        'measurement_item_name_id' => $itemNameId,
+                        'level' => 'WARNING',
+                        'reason' => 'Item ini bergantung pada ' . implode(', ', $affectedDependencies) . ' yang telah berubah atau terpengaruh perubahan, namun item ini belum di-check ulang',
+                        'action' => 'Silakan hit endpoint /samples/check untuk ' . implode(', ', $affectedDependencies) . ' terlebih dahulu, lalu hit untuk ' . $itemNameId,
+                        'dependencies_changed' => array_values($affectedDependencies),
+                        'type' => 'DEPENDENCY_CHANGED',
+                    ];
+                }
+            }
+        }
+        
+        return $warnings;
+    }
+    
+    /**
+     * Find measurement item that provides a specific variable name
+     */
+    private function findMeasurementItemByVariableName(array $measurementPoints, string $variableName): ?string
+    {
+        foreach ($measurementPoints as $mp) {
+            if (isset($mp['variables']) && !empty($mp['variables'])) {
+                foreach ($mp['variables'] as $variable) {
+                    if ($variable['name'] === $variableName) {
+                        return $mp['measurement_item_name_id'];
+                    }
+                }
+            }
+        }
+        return null;
+    }
+    
+    /**
+     * Save last check data as "jejak" for future comparison
+     */
+    private function saveLastCheckData(ProductMeasurement $measurement, string $itemNameId, array $result): void
+    {
+        $lastCheckData = $measurement->last_check_data ?? [];
+        
+        // Save or update last check for this item
+        $lastCheckData[$itemNameId] = [
+            'samples' => $result['samples'],
+            'variable_values' => $result['variable_values'] ?? [],
+            'status' => $result['status'],
+            'joint_setting_formula_values' => $result['joint_setting_formula_values'] ?? null,
+            'checked_at' => now()->toISOString(),
+        ];
+        
+        $measurement->update([
+            'last_check_data' => $lastCheckData
+        ]);
     }
 }

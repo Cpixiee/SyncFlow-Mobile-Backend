@@ -2070,57 +2070,546 @@ paths:
     post:
       tags:
         - Product Measurements
-      summary: Check samples
-      description: Validate and evaluate samples for a specific measurement item
+      summary: Check and validate samples
+      description: |
+        Validate and evaluate samples for a specific measurement item.
+        
+        **IMPORTANT:**
+        - This endpoint does NOT save data to measurement_results (DB)
+        - It ONLY saves to last_check_data (jejak) for future comparison
+        - Used for calculation and validation before save-progress
+        
+        **Side Effects:**
+        - Updates last_check_data field with calculation results
+        - This "jejak" is used by /save-progress for validation
+        
+        **When to use:**
+        - Every time user measures/changes raw data
+        - Before calling /save-progress
+        - When re-validating after data changes
       parameters:
         - name: productMeasurementId
           in: path
           required: true
           schema:
             type: string
+          description: Product measurement ID
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
+              required:
+                - measurement_item_name_id
+                - samples
               properties:
                 measurement_item_name_id:
                   type: string
+                  description: Measurement item name ID
+                  example: "thickness_a"
                 samples:
                   type: array
+                  description: Sample measurements
                   items:
                     type: object
+                    required:
+                      - sample_index
+                    properties:
+                      sample_index:
+                        type: integer
+                        example: 1
+                      single_value:
+                        type: number
+                        description: For SINGLE_VALUE evaluation type
+                        example: 10.5
+                      before_after_value:
+                        type: object
+                        description: For BEFORE_AFTER evaluation type
+                        properties:
+                          before:
+                            type: number
+                            example: 5.2
+                          after:
+                            type: number
+                            example: 10.8
+                      qualitative_value:
+                        type: boolean
+                        description: For QUALITATIVE evaluation type
+                        example: true
+            examples:
+              single_value:
+                summary: Single value measurement
+                value:
+                  measurement_item_name_id: "thickness_a"
+                  samples:
+                    - sample_index: 1
+                      single_value: 10
+                    - sample_index: 2
+                      single_value: 10
+                    - sample_index: 3
+                      single_value: 10
+              with_formula:
+                summary: Measurement with formula dependencies
+                value:
+                  measurement_item_name_id: "room_temp"
+                  samples:
+                    - sample_index: 1
+                      single_value: 25.5
+                    - sample_index: 2
+                      single_value: 25.3
+                    - sample_index: 3
+                      single_value: 25.7
       responses:
         '200':
           description: Samples checked successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  http_code:
+                    type: integer
+                    example: 200
+                  message:
+                    type: string
+                    example: "Samples processed successfully"
+                  error_id:
+                    type: string
+                    nullable: true
+                  data:
+                    type: object
+                    properties:
+                      measurement_item_name_id:
+                        type: string
+                        example: "thickness_a"
+                      status:
+                        type: boolean
+                        description: Overall status (true = OK, false = NG)
+                        example: true
+                      samples:
+                        type: array
+                        description: Validated samples with status
+                        items:
+                          type: object
+                          properties:
+                            sample_index:
+                              type: integer
+                            status:
+                              type: boolean
+                            single_value:
+                              type: number
+                            before_after_value:
+                              type: object
+                            qualitative_value:
+                              type: boolean
+                            pre_processing_formula_values:
+                              type: array
+                              description: Pre-processing formula results
+                              items:
+                                type: number
+                      variable_values:
+                        type: array
+                        description: Calculated variable values from formulas
+                        items:
+                          type: object
+                          properties:
+                            name:
+                              type: string
+                              example: "CROSS_SECTION"
+                            value:
+                              type: number
+                              nullable: true
+                              description: Calculated value (null if dependencies not met)
+                              example: 10.5
+                            status:
+                              type: string
+                              example: "OK"
+                      joint_setting_formula_values:
+                        type: array
+                        description: Joint formula results (if applicable)
+                        items:
+                          type: object
+                          properties:
+                            name:
+                              type: string
+                            formula:
+                              type: string
+                            is_final_value:
+                              type: boolean
+                            value:
+                              type: number
+                              nullable: true
+              examples:
+                simple_measurement:
+                  summary: Simple measurement (no formulas)
+                  value:
+                    http_code: 200
+                    message: "Samples processed successfully"
+                    error_id: null
+                    data:
+                      measurement_item_name_id: "thickness_a"
+                      status: true
+                      samples:
+                        - sample_index: 1
+                          status: true
+                          single_value: 10
+                        - sample_index: 2
+                          status: true
+                          single_value: 10
+                        - sample_index: 3
+                          status: true
+                          single_value: 10
+                      variable_values: []
+                      joint_setting_formula_values: null
+                with_calculated_variables:
+                  summary: Measurement with calculated variables
+                  value:
+                    http_code: 200
+                    message: "Samples processed successfully"
+                    error_id: null
+                    data:
+                      measurement_item_name_id: "room_temp"
+                      status: true
+                      samples:
+                        - sample_index: 1
+                          status: true
+                          single_value: 25.5
+                        - sample_index: 2
+                          status: true
+                          single_value: 25.3
+                        - sample_index: 3
+                          status: true
+                          single_value: 25.7
+                      variable_values:
+                        - name: "CROSS_SECTION"
+                          value: 10.0
+                          status: "OK"
+                      joint_setting_formula_values: null
+                missing_dependencies:
+                  summary: Formula with missing dependencies
+                  value:
+                    http_code: 200
+                    message: "Samples processed successfully"
+                    error_id: null
+                    data:
+                      measurement_item_name_id: "room_temp"
+                      status: null
+                      samples:
+                        - sample_index: 1
+                          status: null
+                          single_value: 25.5
+                      variable_values:
+                        - name: "CROSS_SECTION"
+                          value: null
+                          status: "PENDING"
+                      joint_setting_formula_values: null
+        '404':
+          description: Product measurement or measurement item not found
+        '401':
+          description: Unauthorized
 
   /v1/product-measurement/{productMeasurementId}/save-progress:
     post:
       tags:
         - Product Measurements
-      summary: Save progress
-      description: Save measurement progress (partial save)
+      summary: Save measurement progress
+      description: |
+        Save measurement progress to database.
+        
+        **IMPORTANT:** 
+        - This endpoint validates data against "jejak" (last_check_data)
+        - If validation fails (raw data changed or dependencies outdated), returns 400 error
+        - Data will NOT be saved to database if there are validation warnings
+        
+        **Validation Checks:**
+        - Level 1 (CRITICAL): Raw data changed but not re-checked via /samples/check
+        - Level 2 (WARNING): Dependencies changed but dependent item not updated
+        
+        **Before calling this endpoint:**
+        - Ensure all measurement items have been validated via /samples/check
+        - If you changed raw data, re-hit /samples/check before save-progress
       parameters:
         - name: productMeasurementId
           in: path
           required: true
           schema:
             type: string
+          description: Product measurement ID
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
+              required:
+                - measurement_results
               properties:
                 measurement_results:
                   type: array
+                  description: Array of measurement results to save
                   items:
                     type: object
+                    required:
+                      - measurement_item_name_id
+                    properties:
+                      measurement_item_name_id:
+                        type: string
+                        example: "thickness_a"
+                      status:
+                        type: boolean
+                        description: Overall status (true = OK, false = NG)
+                        example: true
+                      samples:
+                        type: array
+                        description: Sample measurements
+                        items:
+                          type: object
+                          properties:
+                            sample_index:
+                              type: integer
+                              example: 1
+                            status:
+                              type: boolean
+                              example: true
+                            single_value:
+                              type: number
+                              example: 10.5
+                            before_after_value:
+                              type: object
+                              properties:
+                                before:
+                                  type: number
+                                after:
+                                  type: number
+                            qualitative_value:
+                              type: boolean
+                            pre_processing_formula_values:
+                              type: array
+                              items:
+                                type: number
+                      variable_values:
+                        type: array
+                        description: Variable values from formulas
+                        items:
+                          type: object
+                          properties:
+                            name:
+                              type: string
+                              example: "CROSS_SECTION"
+                            value:
+                              type: number
+                              example: 10.5
+                      joint_setting_formula_values:
+                        type: array
+                        description: Joint formula results
+                        items:
+                          type: object
+                          properties:
+                            name:
+                              type: string
+                            formula:
+                              type: string
+                            is_final_value:
+                              type: boolean
+                            value:
+                              type: number
+            examples:
+              valid_save:
+                summary: Valid save (will succeed)
+                value:
+                  measurement_results:
+                    - measurement_item_name_id: "thickness_a"
+                      status: true
+                      samples:
+                        - sample_index: 1
+                          status: true
+                          single_value: 10
+                        - sample_index: 2
+                          status: true
+                          single_value: 10
+                        - sample_index: 3
+                          status: true
+                          single_value: 10
+                    - measurement_item_name_id: "room_temp"
+                      status: true
+                      samples:
+                        - sample_index: 1
+                          single_value: 25.5
+                        - sample_index: 2
+                          single_value: 25.3
+                        - sample_index: 3
+                          single_value: 25.7
+                      variable_values:
+                        - name: "CROSS_SECTION"
+                          value: 10.0
+              invalid_save_changed_data:
+                summary: Invalid save (raw data changed, not re-checked)
+                value:
+                  measurement_results:
+                    - measurement_item_name_id: "thickness_a"
+                      status: true
+                      samples:
+                        - sample_index: 1
+                          single_value: 50
+                        - sample_index: 2
+                          single_value: 10
+                        - sample_index: 3
+                          single_value: 30
       responses:
         '200':
           description: Progress saved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  http_code:
+                    type: integer
+                    example: 200
+                  message:
+                    type: string
+                    example: "Progress saved successfully"
+                  error_id:
+                    type: string
+                    nullable: true
+                  data:
+                    type: object
+                    properties:
+                      measurement_id:
+                        type: string
+                        example: "MSR-XXX"
+                      status:
+                        type: string
+                        example: "IN_PROGRESS"
+                      progress:
+                        type: object
+                        description: Progress calculation
+                      saved_items:
+                        type: integer
+                        example: 2
+                      total_saved_items:
+                        type: integer
+                        example: 4
+              example:
+                http_code: 200
+                message: "Progress saved successfully"
+                error_id: null
+                data:
+                  measurement_id: "MSR-7QG2XBOH"
+                  status: "IN_PROGRESS"
+                  progress:
+                    completed_items: 2
+                    total_items: 4
+                    percentage: 50
+                  saved_items: 2
+                  total_saved_items: 2
+        '400':
+          description: Validation failed - data cannot be saved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  http_code:
+                    type: integer
+                    example: 400
+                  message:
+                    type: string
+                    example: "Tidak dapat menyimpan progress karena ada data yang perlu di-validate ulang"
+                  error_id:
+                    type: string
+                    example: "VALIDATION_REQUIRED"
+                  data:
+                    type: object
+                    properties:
+                      warnings:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            measurement_item_name_id:
+                              type: string
+                            level:
+                              type: string
+                              enum: [CRITICAL, WARNING]
+                            reason:
+                              type: string
+                            action:
+                              type: string
+                            last_check_values:
+                              type: array
+                              items:
+                                type: number
+                            current_values:
+                              type: array
+                              items:
+                                type: number
+                            dependencies_changed:
+                              type: array
+                              items:
+                                type: string
+                            type:
+                              type: string
+                              enum: [RAW_DATA_CHANGED_NOT_VALIDATED, DEPENDENCY_CHANGED]
+                      critical_count:
+                        type: integer
+                      dependency_count:
+                        type: integer
+              examples:
+                critical_warning:
+                  summary: Critical - Raw data changed
+                  value:
+                    http_code: 400
+                    message: "Tidak dapat menyimpan progress karena ada data yang perlu di-validate ulang: 1 item dengan raw data berubah belum di-check ulang"
+                    error_id: "VALIDATION_REQUIRED"
+                    data:
+                      warnings:
+                        - measurement_item_name_id: "thickness_a"
+                          level: "CRITICAL"
+                          reason: "Raw data berubah dari hasil check terakhir tetapi belum di-validate ulang"
+                          action: "Silakan hit endpoint /samples/check untuk item ini terlebih dahulu"
+                          last_check_values: [10, 10, 10]
+                          current_values: [50, 10, 30]
+                          type: "RAW_DATA_CHANGED_NOT_VALIDATED"
+                      critical_count: 1
+                      dependency_count: 0
+                chain_dependencies:
+                  summary: Chain dependencies affected
+                  value:
+                    http_code: 400
+                    message: "Tidak dapat menyimpan progress karena ada data yang perlu di-validate ulang: 1 item dengan raw data berubah belum di-check ulang, 3 item terpengaruh perubahan dependency"
+                    error_id: "VALIDATION_REQUIRED"
+                    data:
+                      warnings:
+                        - measurement_item_name_id: "thickness_a"
+                          level: "CRITICAL"
+                          reason: "Raw data berubah dari hasil check terakhir tetapi belum di-validate ulang"
+                          last_check_values: [10, 10, 10]
+                          current_values: [50, 10, 30]
+                          type: "RAW_DATA_CHANGED_NOT_VALIDATED"
+                        - measurement_item_name_id: "room_temp"
+                          level: "WARNING"
+                          reason: "Item ini bergantung pada thickness_a yang telah berubah atau terpengaruh perubahan, namun item ini belum di-check ulang"
+                          action: "Silakan hit endpoint /samples/check untuk thickness_a terlebih dahulu, lalu hit untuk room_temp"
+                          dependencies_changed: ["thickness_a"]
+                          type: "DEPENDENCY_CHANGED"
+                        - measurement_item_name_id: "final_temp"
+                          level: "WARNING"
+                          reason: "Item ini bergantung pada thickness_a yang telah berubah atau terpengaruh perubahan, namun item ini belum di-check ulang"
+                          dependencies_changed: ["thickness_a"]
+                          type: "DEPENDENCY_CHANGED"
+                        - measurement_item_name_id: "fix_temp"
+                          level: "WARNING"
+                          reason: "Item ini bergantung pada room_temp, final_temp yang telah berubah atau terpengaruh perubahan, namun item ini belum di-check ulang"
+                          dependencies_changed: ["room_temp", "final_temp"]
+                          type: "DEPENDENCY_CHANGED"
+                      critical_count: 1
+                      dependency_count: 3
+        '404':
+          description: Product measurement not found
+        '401':
+          description: Unauthorized
 
   /v1/product-measurement/{productMeasurementId}/submit:
     post:

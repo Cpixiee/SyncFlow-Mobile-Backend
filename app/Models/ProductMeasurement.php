@@ -23,6 +23,7 @@ class ProductMeasurement extends Model
         'sample_status',
         'overall_result',
         'measurement_results',
+        'last_check_data',
         'measured_by',
         'measured_at',
         'due_date',
@@ -32,6 +33,7 @@ class ProductMeasurement extends Model
     protected $casts = [
         'overall_result' => 'boolean',
         'measurement_results' => 'array',
+        'last_check_data' => 'array',
         'measured_at' => 'datetime',
         'due_date' => 'datetime',
         'measurement_type' => MeasurementType::class,
