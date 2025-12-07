@@ -37,7 +37,7 @@ class ProductController extends Controller
                 // Measurement Points
                 'measurement_points' => 'required|array|min:1',
                 'measurement_points.*.setup.name' => 'required|string',
-                'measurement_points.*.setup.name_id' => 'nullable|string|regex:/^[a-zA-Z_]+$/',
+                'measurement_points.*.setup.name_id' => 'nullable|string|regex:/^[a-z][a-z0-9_]*$/',
                 'measurement_points.*.setup.sample_amount' => 'required|integer|min:1',
                 'measurement_points.*.setup.nature' => 'required|in:QUALITATIVE,QUANTITATIVE',
 
@@ -50,14 +50,14 @@ class ProductController extends Controller
                 // Variables
                 'measurement_points.*.variables' => 'nullable|array',
                 'measurement_points.*.variables.*.type' => 'required_with:measurement_points.*.variables|in:FIXED,MANUAL,FORMULA',
-                'measurement_points.*.variables.*.name' => 'required_with:measurement_points.*.variables|string|regex:/^[a-zA-Z_][a-zA-Z0-9_]*$/',
+                'measurement_points.*.variables.*.name' => 'required_with:measurement_points.*.variables|string|regex:/^[a-z][a-z0-9_]*$/',
                 'measurement_points.*.variables.*.value' => 'required_if:measurement_points.*.variables.*.type,FIXED|nullable|numeric',
                 'measurement_points.*.variables.*.formula' => 'required_if:measurement_points.*.variables.*.type,FORMULA|nullable|string',
                 'measurement_points.*.variables.*.is_show' => 'required_with:measurement_points.*.variables|boolean',
 
                 // Pre-processing formulas
                 'measurement_points.*.pre_processing_formulas' => 'nullable|array',
-                'measurement_points.*.pre_processing_formulas.*.name' => 'required_with:measurement_points.*.pre_processing_formulas|string|regex:/^[a-zA-Z_][a-zA-Z0-9_]*$/',
+                'measurement_points.*.pre_processing_formulas.*.name' => 'required_with:measurement_points.*.pre_processing_formulas|string|regex:/^[a-z][a-z0-9_]*$/',
                 'measurement_points.*.pre_processing_formulas.*.formula' => 'required_with:measurement_points.*.pre_processing_formulas|string',
                 'measurement_points.*.pre_processing_formulas.*.is_show' => 'required_with:measurement_points.*.pre_processing_formulas|boolean',
 
@@ -1088,10 +1088,11 @@ class ProductController extends Controller
                 $errors["measurement_point_{$pointIndex}"] = 'Duplicate names found: ' . implode(', ', array_unique($duplicates));
             }
 
-            // Validate name format (alphanumeric + underscore, must start with letter or underscore)
+            // ✅ NEW RULE: Name must be lowercase, start with letter, can contain numbers and underscores
+            // Format: ^[a-z][a-z0-9_]*$ (lowercase letter first, then lowercase letters, numbers, underscores)
             foreach ($allNames as $name) {
-                if (!preg_match('/^[a-zA-Z_][a-zA-Z0-9_]*$/', $name)) {
-                    $errors["measurement_point_{$pointIndex}"] = "Invalid name format: {$name}. Name must start with letter or underscore, followed by letters, numbers, or underscores.";
+                if (!preg_match('/^[a-z][a-z0-9_]*$/', $name)) {
+                    $errors["measurement_point_{$pointIndex}"] = "Invalid name format: '{$name}'. Name must be lowercase, start with a letter (a-z), and can only contain lowercase letters, numbers, and underscores. No spaces or uppercase letters allowed. Example: 'avg_value', 'thickness_1', 'room_temp'";
                 }
             }
         }

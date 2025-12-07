@@ -287,14 +287,49 @@ class ProductMeasurementController extends Controller
 
         switch ($measurement->status) {
             case 'PENDING':
-                return 'ONGOING';
+                return 'TODO';
             case 'IN_PROGRESS':
-                return 'NEED_TO_MEASURE';
+                // Check if pernah submit (ada measurement_results yang NG)
+                // Jika pernah submit dan ada NG, status = NEED_TO_MEASURE
+                // Jika belum pernah submit, status = ONGOING
+                if ($this->hasBeenSubmittedWithNG($measurement)) {
+                    return 'NEED_TO_MEASURE';
+                }
+                return 'ONGOING';
             case 'COMPLETED':
-                return $measurement->overall_result ? 'OK' : 'OK'; // Both OK and NG show as OK in list
+                return $measurement->overall_result ? 'OK' : 'NG';
             default:
                 return 'TODO';
         }
+    }
+    
+    /**
+     * Check if measurement has been submitted and has NG samples
+     */
+    private function hasBeenSubmittedWithNG($measurement): bool
+    {
+        // Cek apakah pernah submit (measured_at tidak null) dan ada hasil NG
+        if (!$measurement->measured_at) {
+            return false; // Belum pernah submit
+        }
+        
+        // Cek apakah ada measurement results dengan status NG
+        $measurementResults = $measurement->measurement_results ?? [];
+        foreach ($measurementResults as $result) {
+            if (isset($result['status']) && $result['status'] === false) {
+                return true; // Ada yang NG
+            }
+            // Check samples
+            if (isset($result['samples'])) {
+                foreach ($result['samples'] as $sample) {
+                    if (isset($sample['status']) && $sample['status'] === false) {
+                        return true; // Ada sample NG
+                    }
+                }
+            }
+        }
+        
+        return false;
     }
 
     /**
@@ -838,6 +873,39 @@ class ProductMeasurementController extends Controller
         // Register custom functions
         $this->registerCustomFunctionsForItem($executor);
         
+        // ✅ FIX: Extract RAW VALUES (single_value, before, after) dari samples
+        $rawValues = [];
+        foreach ($processedSamples as $sample) {
+            // Collect single_value
+            if (isset($sample['single_value']) && is_numeric($sample['single_value'])) {
+                if (!isset($rawValues['single_value'])) {
+                    $rawValues['single_value'] = [];
+                }
+                $rawValues['single_value'][] = $sample['single_value'];
+            }
+            
+            // Collect before_after_value
+            if (isset($sample['before_after_value'])) {
+                if (isset($sample['before_after_value']['before']) && is_numeric($sample['before_after_value']['before'])) {
+                    if (!isset($rawValues['before'])) {
+                        $rawValues['before'] = [];
+                    }
+                    $rawValues['before'][] = $sample['before_after_value']['before'];
+                }
+                if (isset($sample['before_after_value']['after']) && is_numeric($sample['before_after_value']['after'])) {
+                    if (!isset($rawValues['after'])) {
+                        $rawValues['after'] = [];
+                    }
+                    $rawValues['after'][] = $sample['before_after_value']['after'];
+                }
+            }
+        }
+        
+        // Set raw values as arrays untuk aggregation functions (avg, min, max, sum)
+        foreach ($rawValues as $name => $values) {
+            $executor->setVar($name, $values);
+        }
+        
         // Extract all pre_processing_formula_values from samples untuk aggregation
         $aggregatedValues = [];
         foreach ($processedSamples as $sample) {
@@ -874,12 +942,13 @@ class ProductMeasurementController extends Controller
                 // Set result untuk formula berikutnya
                 $executor->setVar($formula['name'], $result);
             } catch (\Exception $e) {
-                // If formula fails (missing variable), return null
+                // If formula fails (missing variable), return null with error message
                 $jointResults[] = [
                     'name' => $formula['name'],
                     'formula' => $formula['formula'],
                     'is_final_value' => $formula['is_final_value'],
-                    'value' => null
+                    'value' => null,
+                    'error' => $e->getMessage()
                 ];
             }
         }
