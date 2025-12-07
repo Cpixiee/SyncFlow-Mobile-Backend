@@ -975,7 +975,7 @@ class ProductMeasurementController extends Controller
     /**
      * Evaluate joint for individual item
      */
-    private function evaluateJointItem(array $result, array $measurementPoint, array $processedSamples): array
+    private function evaluateJointItem(array $result, array $measurementPoint, array $processedSamples, array $measurementContext = []): array
     {
         $jointSetting = $measurementPoint['evaluation_setting']['joint_setting'];
         $ruleEvaluation = $measurementPoint['rule_evaluation_setting'];
@@ -1042,25 +1042,65 @@ class ProductMeasurementController extends Controller
             $executor->setVar($name, $values);
         }
         
+        // ✅ NEW: Set cross-reference values dari measurement context (dot notation support)
+        foreach ($measurementContext as $itemNameId => $itemData) {
+            // For dot notation like thickness_a.avg
+            if (isset($itemData['joint_setting_formula_values'])) {
+                foreach ($itemData['joint_setting_formula_values'] as $jointFormula) {
+                    if (isset($jointFormula['name']) && isset($jointFormula['value'])) {
+                        // Set as: thickness_a_avg untuk digunakan di formula
+                        $varName = $itemNameId . '_' . $jointFormula['name'];
+                        $executor->setVar($varName, $jointFormula['value']);
+                    }
+                }
+            }
+            
+            // For function notation like avg(thickness_a)
+            $sampleValues = [];
+            if (isset($itemData['samples']) && is_array($itemData['samples'])) {
+                foreach ($itemData['samples'] as $sample) {
+                    if (isset($sample['single_value']) && is_numeric($sample['single_value'])) {
+                        $sampleValues[] = $sample['single_value'];
+                    }
+                }
+            }
+            if (!empty($sampleValues)) {
+                $executor->setVar($itemNameId, $sampleValues);
+            }
+        }
+        
         // Execute each joint formula
         foreach ($jointSetting['formulas'] as $formula) {
             try {
-                $result = $executor->execute($formula['formula']);
+                // ✅ FIX: Strip = prefix before execution
+                $formulaToExecute = \App\Helpers\FormulaHelper::stripFormulaPrefix($formula['formula']);
+                
+                // ✅ NEW: Transform dot notation to variable names
+                preg_match_all('/\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\.\s*([a-zA-Z_][a-zA-Z0-9_]*)\b/', $formulaToExecute, $matches, PREG_SET_ORDER);
+                foreach ($matches as $match) {
+                    $fullMatch = $match[0]; // e.g., "thickness_a.avg"
+                    $varName = $match[1] . '_' . $match[2]; // e.g., "thickness_a_avg"
+                    $formulaToExecute = str_replace($fullMatch, $varName, $formulaToExecute);
+                }
+                
+                $calculatedValue = $executor->execute($formulaToExecute);
+                
+                // ✅ FIX: Ensure value is always included, even if null
                 $jointResults[] = [
                     'name' => $formula['name'],
                     'formula' => $formula['formula'],
-                    'is_final_value' => $formula['is_final_value'],
-                    'value' => $result
+                    'is_final_value' => $formula['is_final_value'] ?? false,
+                    'value' => $calculatedValue !== null ? (is_numeric($calculatedValue) ? (float)$calculatedValue : $calculatedValue) : null
                 ];
                 
                 // Set result untuk formula berikutnya
-                $executor->setVar($formula['name'], $result);
+                $executor->setVar($formula['name'], $calculatedValue);
             } catch (\Exception $e) {
-                // If formula fails (missing variable), return null with error message
+                // ✅ FIX: If formula fails, return null value with error message
                 $jointResults[] = [
                     'name' => $formula['name'],
                     'formula' => $formula['formula'],
-                    'is_final_value' => $formula['is_final_value'],
+                    'is_final_value' => $formula['is_final_value'] ?? false,
                     'value' => null,
                     'error' => $e->getMessage()
                 ];
@@ -1072,7 +1112,7 @@ class ProductMeasurementController extends Controller
         // Evaluate status based on rule if there's a final value
         $finalValue = null;
         foreach ($jointResults as $jointResult) {
-            if ($jointResult['is_final_value'] && $jointResult['value'] !== null) {
+            if (isset($jointResult['is_final_value']) && $jointResult['is_final_value'] && $jointResult['value'] !== null) {
                 $finalValue = $jointResult['value'];
                 break;
             }
