@@ -824,9 +824,13 @@ class ProductController extends Controller
                         if (!empty($formulaErrors)) {
                             $errors = array_merge($errors, $formulaErrors);
                         } else {
-                            // Process formula: strip =, normalize functions
+                            // ✅ FIX: Validate & normalize but DON'T strip = prefix for storage
+                            // Formula will be stored with = prefix for response consistency
                             try {
-                                $variable['formula'] = FormulaHelper::processFormula($variable['formula']);
+                                // Only validate and normalize, keep = prefix
+                                FormulaHelper::validateFormulaFormat($variable['formula']);
+                                $normalized = FormulaHelper::normalizeFunctionNames($variable['formula']);
+                                $variable['formula'] = $normalized; // Keep with =
                             } catch (\InvalidArgumentException $e) {
                                 $errors["{$pointPrefix}.variable_{$varIndex}"] = $e->getMessage();
                             }
@@ -860,9 +864,11 @@ class ProductController extends Controller
                         if (!empty($formulaErrors)) {
                             $errors = array_merge($errors, $formulaErrors);
                         } else {
-                            // Process formula
+                            // ✅ FIX: Validate & normalize but DON'T strip = prefix for storage
                             try {
-                                $formula['formula'] = FormulaHelper::processFormula($formula['formula']);
+                                FormulaHelper::validateFormulaFormat($formula['formula']);
+                                $normalized = FormulaHelper::normalizeFunctionNames($formula['formula']);
+                                $formula['formula'] = $normalized; // Keep with =
                             } catch (\InvalidArgumentException $e) {
                                 $errors["{$pointPrefix}.pre_processing_formula_{$formulaIndex}"] = $e->getMessage();
                             }
@@ -897,9 +903,11 @@ class ProductController extends Controller
                         if (!empty($formulaErrors)) {
                             $errors = array_merge($errors, $formulaErrors);
                         } else {
-                            // Process formula
+                            // ✅ FIX: Validate & normalize but DON'T strip = prefix for storage
                             try {
-                                $formula['formula'] = FormulaHelper::processFormula($formula['formula']);
+                                FormulaHelper::validateFormulaFormat($formula['formula']);
+                                $normalized = FormulaHelper::normalizeFunctionNames($formula['formula']);
+                                $formula['formula'] = $normalized; // Keep with =
                             } catch (\InvalidArgumentException $e) {
                                 $errors["{$pointPrefix}.joint_formula_{$formulaIndex}"] = $e->getMessage();
                             }

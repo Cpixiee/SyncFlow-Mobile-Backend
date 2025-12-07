@@ -650,12 +650,15 @@ class ProductMeasurementController extends Controller
                 );
             }
 
-            // Get variable values from FE or from saved measurement_results
+            // Get variable values from FE or from saved measurement_results OR last_check_data
             $variableValues = $request->variable_values ?? [];
+            
+            // ✅ NEW: Build measurement context dari last_check_data untuk cross-reference (dot notation)
+            $measurementContext = $this->buildMeasurementContext($measurement);
             
             // If variable_values not provided by FE, try to get from saved measurement_results
             if (empty($variableValues) && isset($measurementPoint['variables'])) {
-                $variableValues = $this->extractVariableValuesFromSavedResults($measurement, $measurementPoint['variables']);
+                $variableValues = $this->extractVariableValuesFromContext($measurementContext, $measurementPoint['variables']);
             }
 
             // Process single measurement item
@@ -666,10 +669,10 @@ class ProductMeasurementController extends Controller
             ];
 
             // Process samples dengan variables dan pre-processing formulas
-            $processedSamples = $this->processSampleItem($measurementItemData, $measurementPoint);
+            $processedSamples = $this->processSampleItem($measurementItemData, $measurementPoint, $measurementContext);
             
-            // Evaluate berdasarkan evaluation type
-            $result = $this->evaluateSampleItem($processedSamples, $measurementPoint, $measurementItemData);
+            // Evaluate berdasarkan evaluation type dengan measurement context
+            $result = $this->evaluateSampleItem($processedSamples, $measurementPoint, $measurementItemData, $measurementContext);
 
             // ✅ Save hasil check sebagai "jejak" untuk comparison nanti
             $this->saveLastCheckData($measurement, $request->measurement_item_name_id, $result);
@@ -682,6 +685,116 @@ class ProductMeasurementController extends Controller
                 'SAMPLES_PROCESS_ERROR',
                 500
             );
+        }
+    }
+    
+    /**
+     * ✅ NEW: Build measurement context dari last_check_data untuk cross-reference
+     * Returns associative array: measurement_item_name_id => measurement_data
+     */
+    private function buildMeasurementContext(ProductMeasurement $measurement): array
+    {
+        $context = [];
+        $lastCheckData = $measurement->last_check_data ?? [];
+        
+        foreach ($lastCheckData as $itemNameId => $itemData) {
+            $context[$itemNameId] = $itemData;
+        }
+        
+        return $context;
+    }
+    
+    /**
+     * ✅ NEW: Extract variable values from measurement context (for FORMULA type variables)
+     * Supports both function notation avg(thickness_a) and dot notation thickness_a.avg
+     */
+    private function extractVariableValuesFromContext(array $measurementContext, array $variables): array
+    {
+        $variableValues = [];
+        
+        foreach ($variables as $variable) {
+            if ($variable['type'] === 'FORMULA' && isset($variable['formula'])) {
+                try {
+                    // Calculate formula value using measurement context
+                    $formulaValue = $this->evaluateFormulaWithContext($variable['formula'], $measurementContext);
+                    
+                    if ($formulaValue !== null) {
+                        $variableValues[] = [
+                            'name_id' => $variable['name'],
+                            'value' => $formulaValue
+                        ];
+                    }
+                } catch (\Exception $e) {
+                    // Skip if formula can't be evaluated (dependencies not ready)
+                    continue;
+                }
+            }
+        }
+        
+        return $variableValues;
+    }
+    
+    /**
+     * ✅ NEW: Evaluate formula with measurement context
+     * Supports: avg(thickness_a), thickness_a.avg, etc.
+     */
+    private function evaluateFormulaWithContext(string $formula, array $measurementContext): ?float
+    {
+        $executor = new \NXP\MathExecutor();
+        $this->registerCustomFunctionsForItem($executor);
+        
+        // Strip = prefix for execution
+        $formula = \App\Helpers\FormulaHelper::stripFormulaPrefix($formula);
+        
+        // ✅ Handle dot notation: thickness_a.avg → get value dari context
+        preg_match_all('/\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\.\s*([a-zA-Z_][a-zA-Z0-9_]*)\b/', $formula, $matches, PREG_SET_ORDER);
+        
+        foreach ($matches as $match) {
+            $fullMatch = $match[0]; // e.g., "thickness_a.avg"
+            $measurementItemId = $match[1]; // e.g., "thickness_a"
+            $formulaName = $match[2]; // e.g., "avg"
+            
+            // Get value from measurement context
+            if (isset($measurementContext[$measurementItemId])) {
+                $itemContext = $measurementContext[$measurementItemId];
+                
+                // Try to find in joint_setting_formula_values
+                if (isset($itemContext['joint_setting_formula_values'])) {
+                    foreach ($itemContext['joint_setting_formula_values'] as $jointFormula) {
+                        if ($jointFormula['name'] === $formulaName && isset($jointFormula['value'])) {
+                            $value = $jointFormula['value'];
+                            // Replace dot notation with actual value
+                            $formula = str_replace($fullMatch, (string)$value, $formula);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        
+        // ✅ Handle function notation: avg(thickness_a) → aggregate dari samples
+        foreach ($measurementContext as $itemNameId => $itemData) {
+            // Extract samples untuk aggregation
+            $sampleValues = [];
+            if (isset($itemData['samples']) && is_array($itemData['samples'])) {
+                foreach ($itemData['samples'] as $sample) {
+                    if (isset($sample['single_value']) && is_numeric($sample['single_value'])) {
+                        $sampleValues[] = $sample['single_value'];
+                    }
+                }
+            }
+            
+            // Set as array untuk aggregation functions
+            if (!empty($sampleValues)) {
+                $executor->setVar($itemNameId, $sampleValues);
+            }
+        }
+        
+        try {
+            $result = $executor->execute($formula);
+            return is_numeric($result) ? (float)$result : null;
+        } catch (\Exception $e) {
+            return null;
         }
     }
     
@@ -741,7 +854,7 @@ class ProductMeasurementController extends Controller
     /**
      * Process samples for individual measurement item
      */
-    private function processSampleItem(array $measurementItem, array $measurementPoint): array
+    private function processSampleItem(array $measurementItem, array $measurementPoint, array $measurementContext = []): array
     {
         $processedSamples = [];
         $variables = $measurementItem['variable_values'] ?? [];
@@ -769,7 +882,8 @@ class ProductMeasurementController extends Controller
                 $processedFormulas = $this->processPreProcessingFormulasForItem(
                     $measurementPoint['pre_processing_formulas'],
                     $rawValues,
-                    $variables
+                    $variables,
+                    $measurementContext
                 );
                 
                 $processedSample['pre_processing_formula_values'] = array_map(function($formula, $result) {
@@ -791,7 +905,7 @@ class ProductMeasurementController extends Controller
     /**
      * Evaluate samples for individual measurement item
      */
-    private function evaluateSampleItem(array $processedSamples, array $measurementPoint, array $measurementItem): array
+    private function evaluateSampleItem(array $processedSamples, array $measurementPoint, array $measurementItem, array $measurementContext = []): array
     {
         $evaluationType = $measurementPoint['evaluation_type'];
         $result = [
@@ -807,7 +921,7 @@ class ProductMeasurementController extends Controller
                 break;
                 
             case 'JOINT':
-                $result = $this->evaluateJointItem($result, $measurementPoint, $processedSamples);
+                $result = $this->evaluateJointItem($result, $measurementPoint, $processedSamples, $measurementContext);
                 break;
                 
             case 'SKIP_CHECK':

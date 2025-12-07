@@ -119,6 +119,7 @@ class FormulaHelper
     /**
      * Extract measurement item references from formula
      * Example: "avg(thickness_a) + avg(thickness_b)" -> ["thickness_a", "thickness_b"]
+     * Example: "thickness_a.avg + thickness_b.avg" -> ["thickness_a", "thickness_b"]
      */
     public static function extractMeasurementReferences(string $formula): array
     {
@@ -130,6 +131,11 @@ class FormulaHelper
         // Extract from function calls like avg(thickness_a)
         if (preg_match_all('/\b(avg|sum|min|max)\s*\(\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\)/i', $formula, $matches)) {
             $references = array_merge($references, $matches[2]);
+        }
+        
+        // ✅ NEW: Extract from dot notation like thickness_a.avg or room_temp.fix
+        if (preg_match_all('/\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\.\s*([a-zA-Z_][a-zA-Z0-9_]*)\b/', $formula, $matches)) {
+            $references = array_merge($references, $matches[1]); // Get the measurement item part before the dot
         }
         
         // Extract standalone variable references (not in functions)
@@ -171,6 +177,55 @@ class FormulaHelper
         // Remove duplicates and return
         return array_unique($references);
     }
+    
+    /**
+     * Transform dot notation to get aggregation result from measurement context
+     * Example: "thickness_a.avg" → extract from measurement_context['thickness_a']['joint_results']['avg']
+     * 
+     * @param string $formula Formula dengan dot notation
+     * @param array $measurementContext Context dari measurement items yang sudah diproses
+     * @return string Formula yang sudah di-transform
+     */
+    public static function transformDotNotationFormula(string $formula, array $measurementContext): string
+    {
+        // Find all dot notation patterns: measurement_item.formula_name
+        // Example: thickness_a.avg, room_temp.fix
+        preg_match_all('/\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\.\s*([a-zA-Z_][a-zA-Z0-9_]*)\b/', $formula, $matches, PREG_SET_ORDER);
+        
+        foreach ($matches as $match) {
+            $fullMatch = $match[0]; // e.g., "thickness_a.avg"
+            $measurementItemId = $match[1]; // e.g., "thickness_a"
+            $formulaName = $match[2]; // e.g., "avg"
+            
+            // Get value from measurement context
+            $value = null;
+            if (isset($measurementContext[$measurementItemId])) {
+                $itemContext = $measurementContext[$measurementItemId];
+                
+                // Try to find in joint_setting_formula_values
+                if (isset($itemContext['joint_setting_formula_values'])) {
+                    foreach ($itemContext['joint_setting_formula_values'] as $jointFormula) {
+                        if ($jointFormula['name'] === $formulaName && isset($jointFormula['value'])) {
+                            $value = $jointFormula['value'];
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            if ($value !== null) {
+                // Replace dot notation with actual value
+                $formula = str_replace($fullMatch, (string)$value, $formula);
+            } else {
+                // If value not found, replace with variable name for MathExecutor
+                // This will be set dynamically during execution
+                $variableName = $measurementItemId . '_' . $formulaName;
+                $formula = str_replace($fullMatch, $variableName, $formula);
+            }
+        }
+        
+        return $formula;
+    }
 
     /**
      * Validate formula dependencies
@@ -195,19 +250,23 @@ class FormulaHelper
     }
 
     /**
-     * Process formula: validate, strip prefix, normalize
+     * Process formula: validate, strip prefix ONLY FOR EXECUTION, normalize
+     * IMPORTANT: This is for INTERNAL processing, not for storage/response
      * 
      * @param string $formula Original formula
+     * @param bool $stripPrefix Whether to strip = prefix (default: true for execution)
      * @return string Processed formula ready for execution
      * @throws \InvalidArgumentException if validation fails
      */
-    public static function processFormula(string $formula): string
+    public static function processFormula(string $formula, bool $stripPrefix = true): string
     {
         // Validate format
         self::validateFormulaFormat($formula);
         
-        // Strip = prefix
-        $formula = self::stripFormulaPrefix($formula);
+        // Strip = prefix ONLY if requested (for execution)
+        if ($stripPrefix) {
+            $formula = self::stripFormulaPrefix($formula);
+        }
         
         // Normalize function names
         $formula = self::normalizeFunctionNames($formula);
