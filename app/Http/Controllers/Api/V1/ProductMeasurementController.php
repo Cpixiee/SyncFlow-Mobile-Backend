@@ -2510,10 +2510,10 @@ class ProductMeasurementController extends Controller
                     continue;
                 }
                 
-                // Find measurement point definition
+                // Find measurement point definition (guard against missing keys)
                 $measurementPoint = null;
                 foreach ($measurementPoints as $mp) {
-                    if ($mp['measurement_item_name_id'] === $itemNameId) {
+                    if (isset($mp['setup']['name_id']) && $mp['setup']['name_id'] === $itemNameId) {
                         $measurementPoint = $mp;
                         break;
                     }

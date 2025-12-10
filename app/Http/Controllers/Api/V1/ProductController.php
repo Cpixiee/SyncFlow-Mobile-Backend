@@ -63,7 +63,8 @@ class ProductController extends Controller
 
                 // Evaluation
                 'measurement_points.*.evaluation_type' => 'required|in:PER_SAMPLE,JOINT,SKIP_CHECK',
-                'measurement_points.*.evaluation_setting' => 'required|array',
+                // Allow empty evaluation_setting for SKIP_CHECK, required otherwise
+                'measurement_points.*.evaluation_setting' => 'required_unless:measurement_points.*.evaluation_type,SKIP_CHECK|array|nullable',
 
                 // Rule evaluation
                 'measurement_points.*.rule_evaluation_setting' => 'nullable|array',
@@ -480,7 +481,8 @@ class ProductController extends Controller
                 'measurement_points.*.pre_processing_formulas.*.formula' => 'required_with:measurement_points.*.pre_processing_formulas|string',
                 'measurement_points.*.pre_processing_formulas.*.is_show' => 'required_with:measurement_points.*.pre_processing_formulas|boolean',
                 'measurement_points.*.evaluation_type' => 'required_with:measurement_points|in:PER_SAMPLE,JOINT,SKIP_CHECK',
-                'measurement_points.*.evaluation_setting' => 'required_with:measurement_points|array',
+                // Allow empty evaluation_setting for SKIP_CHECK, required otherwise
+                'measurement_points.*.evaluation_setting' => 'required_unless:measurement_points.*.evaluation_type,SKIP_CHECK|array|nullable',
                 'measurement_points.*.rule_evaluation_setting' => 'nullable|array',
                 'measurement_points.*.rule_evaluation_setting.rule' => 'required_with:measurement_points.*.rule_evaluation_setting|in:MIN,MAX,BETWEEN',
                 'measurement_points.*.rule_evaluation_setting.unit' => 'required_with:measurement_points.*.rule_evaluation_setting|string',
