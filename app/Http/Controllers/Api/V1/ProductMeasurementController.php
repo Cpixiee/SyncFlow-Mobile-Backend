@@ -1165,13 +1165,29 @@ class ProductMeasurementController extends Controller
     /**
      * Process pre-processing formulas for individual item
      */
-    private function processPreProcessingFormulasForItem(array $formulas, array $rawValues, array $variables): array
+    private function processPreProcessingFormulasForItem(array $formulas, array $rawValues, array $variables, array $measurementContext = []): array
     {
         $results = [];
         $executor = new \NXP\MathExecutor();
         
         // Register custom functions
         $this->registerCustomFunctionsForItem($executor);
+        
+        // ✅ Set measurement context values for cross-reference (dot notation support)
+        foreach ($measurementContext as $itemNameId => $itemData) {
+            // For function notation like avg(thickness_a)
+            $sampleValues = [];
+            if (isset($itemData['samples']) && is_array($itemData['samples'])) {
+                foreach ($itemData['samples'] as $sample) {
+                    if (isset($sample['single_value']) && is_numeric($sample['single_value'])) {
+                        $sampleValues[] = $sample['single_value'];
+                    }
+                }
+            }
+            if (!empty($sampleValues)) {
+                $executor->setVar($itemNameId, $sampleValues);
+            }
+        }
         
         // Set raw values as variables
         foreach ($rawValues as $key => $value) {
@@ -1188,7 +1204,7 @@ class ProductMeasurementController extends Controller
         
         // Set variable values as variables
         foreach ($variables as $variable) {
-            if (is_numeric($variable['value'])) {
+            if (isset($variable['name_id']) && isset($variable['value']) && is_numeric($variable['value'])) {
                 $executor->setVar($variable['name_id'], $variable['value']);
             }
         }
@@ -1196,7 +1212,10 @@ class ProductMeasurementController extends Controller
         // Execute each formula
         foreach ($formulas as $formula) {
             try {
-                $result = $executor->execute($formula['formula']);
+                // ✅ FIX: Strip = prefix before execution
+                $formulaToExecute = \App\Helpers\FormulaHelper::stripFormulaPrefix($formula['formula']);
+                
+                $result = $executor->execute($formulaToExecute);
                 $results[] = $result;
                 
                 // Set result untuk formula berikutnya
@@ -1384,6 +1403,49 @@ class ProductMeasurementController extends Controller
                 );
             }
 
+            // ✅ FIX: Validate that all measurement_item_name_id exist in product
+            $product = $measurement->product;
+            if (!$product) {
+                return $this->errorResponse(
+                    'Product tidak ditemukan untuk measurement ini',
+                    'PRODUCT_NOT_FOUND',
+                    404
+                );
+            }
+
+            $measurementPoints = $product->measurement_points ?? [];
+            $validMeasurementItemNameIds = [];
+            foreach ($measurementPoints as $point) {
+                if (isset($point['setup']['name_id'])) {
+                    $validMeasurementItemNameIds[] = $point['setup']['name_id'];
+                }
+            }
+
+            // Validate each measurement_item_name_id in request
+            $invalidMeasurementItems = [];
+            foreach ($request->measurement_results as $index => $result) {
+                $itemNameId = $result['measurement_item_name_id'] ?? null;
+                if ($itemNameId && !in_array($itemNameId, $validMeasurementItemNameIds)) {
+                    $invalidMeasurementItems[] = [
+                        'index' => $index,
+                        'measurement_item_name_id' => $itemNameId,
+                        'message' => "Measurement item '{$itemNameId}' tidak ditemukan di product ini"
+                    ];
+                }
+            }
+
+            if (!empty($invalidMeasurementItems)) {
+                return $this->errorResponse(
+                    'Beberapa measurement_item_name_id tidak valid',
+                    'INVALID_MEASUREMENT_ITEM',
+                    400,
+                    [
+                        'invalid_items' => $invalidMeasurementItems,
+                        'valid_measurement_items' => $validMeasurementItemNameIds
+                    ]
+                );
+            }
+
             // Get existing results
             $existingResults = $measurement->measurement_results ?? [];
             $lastCheckData = $measurement->last_check_data ?? [];  // ✅ Jejak terakhir dari /samples/check
@@ -1456,6 +1518,78 @@ class ProductMeasurementController extends Controller
                     // (useful for items without sample changes but dependency updates)
                 }
                 
+                // ✅ FIX: Validate and process preprocessing formulas if needed
+                $measurementPoint = null;
+                foreach ($measurementPoints as $mp) {
+                    if (isset($mp['setup']['name_id']) && $mp['setup']['name_id'] === $itemNameId) {
+                        $measurementPoint = $mp;
+                        break;
+                    }
+                }
+
+                // If measurement point has preprocessing formulas, ensure they are processed
+                if ($measurementPoint && isset($measurementPoint['pre_processing_formulas']) && !empty($measurementPoint['pre_processing_formulas'])) {
+                    // Check if preprocessing formulas are already in samples
+                    $needsPreprocessing = false;
+                    foreach ($newSamples as $sample) {
+                        if (!isset($sample['pre_processing_formula_values']) || empty($sample['pre_processing_formula_values'])) {
+                            $needsPreprocessing = true;
+                            break;
+                        }
+                    }
+
+                    // If preprocessing is needed, process it
+                    if ($needsPreprocessing) {
+                        try {
+                            $processedSamples = [];
+                            $variableValues = $newResult['variable_values'] ?? [];
+                            
+                            // Build measurement context for cross-reference
+                            $measurementContext = $this->buildMeasurementContext($measurement);
+                            
+                            foreach ($newSamples as $sample) {
+                                $rawValues = [];
+                                $setup = $measurementPoint['setup'];
+                                
+                                if ($setup['type'] === 'SINGLE' && isset($sample['single_value'])) {
+                                    $rawValues['single_value'] = $sample['single_value'];
+                                } elseif ($setup['type'] === 'BEFORE_AFTER' && isset($sample['before_after_value'])) {
+                                    $rawValues['before_after_value'] = $sample['before_after_value'];
+                                }
+
+                                // Process preprocessing formulas
+                                $processedFormulas = $this->processPreProcessingFormulasForItem(
+                                    $measurementPoint['pre_processing_formulas'],
+                                    $rawValues,
+                                    $variableValues,
+                                    $measurementContext
+                                );
+                                
+                                // Add preprocessing formula values to sample
+                                $sample['pre_processing_formula_values'] = array_map(function($formula, $result) {
+                                    return [
+                                        'name' => $formula['name'],
+                                        'formula' => $formula['formula'],
+                                        'value' => $result,
+                                        'is_show' => $formula['is_show'] ?? false
+                                    ];
+                                }, $measurementPoint['pre_processing_formulas'], $processedFormulas);
+                                
+                                $processedSamples[] = $sample;
+                            }
+                            
+                            // Update newSamples with processed formulas
+                            $newSamples = $processedSamples;
+                        } catch (\Exception $e) {
+                            return $this->errorResponse(
+                                "Error processing preprocessing formulas untuk measurement item '{$itemNameId}': " . $e->getMessage(),
+                                'PREPROCESSING_FORMULA_ERROR',
+                                400
+                            );
+                        }
+                    }
+                }
+
                 // Update or add result
                 if (isset($existingResultsMap[$itemNameId])) {
                     $key = $existingResultsMap[$itemNameId]['key'];
