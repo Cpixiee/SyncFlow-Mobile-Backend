@@ -1930,6 +1930,69 @@ class ProductMeasurementController extends Controller
                 return $this->notFoundResponse('Product measurement tidak ditemukan');
             }
 
+            // ✅ FIX: Ensure pre_processing_formula_values tersedia saat fetch detail
+            // Recompute if missing using saved samples & variable_values
+            $measurementResults = $measurement->measurement_results ?? [];
+            $product = $measurement->product;
+            $measurementPoints = $product?->measurement_points ?? [];
+
+            // Build quick lookup measurement point by name_id
+            $measurementPointMap = [];
+            foreach ($measurementPoints as $point) {
+                if (isset($point['setup']['name_id'])) {
+                    $measurementPointMap[$point['setup']['name_id']] = $point;
+                }
+            }
+
+            // Build measurement context from current measurement_results
+            $context = [];
+            foreach ($measurementResults as $item) {
+                $itemId = $item['measurement_item_name_id'] ?? null;
+                if ($itemId) {
+                    $context[$itemId] = $item;
+                }
+            }
+
+            // Recompute missing variable_values, pre_processing_formula_values, and joint formulas per measurement item
+            foreach ($measurementResults as &$item) {
+                $itemId = $item['measurement_item_name_id'] ?? null;
+                if (!$itemId || !isset($measurementPointMap[$itemId])) {
+                    continue;
+                }
+
+                $point = $measurementPointMap[$itemId];
+                $hasPreProcessing = isset($point['pre_processing_formulas']) && !empty($point['pre_processing_formulas']);
+
+                // Rebuild variable_values (include FIXED, MANUAL, FORMULA)
+                $currentVariables = $item['variable_values'] ?? [];
+                $rebuiltVariables = $this->buildCompleteVariableValues($point, $currentVariables, $context);
+
+                // Recompute pre-processing & joint formulas using existing samples
+                $measurementItemData = [
+                    'measurement_item_name_id' => $itemId,
+                    'variable_values' => $rebuiltVariables,
+                    'samples' => $item['samples'] ?? [],
+                ];
+
+                // Re-process samples to rebuild pre_processing_formula_values
+                $processedSamples = $this->processSampleItem($measurementItemData, $point, $context);
+
+                // Evaluate (to rebuild joint_setting_formula_values if needed)
+                $evaluated = $this->evaluateSampleItem($processedSamples, $point, $measurementItemData, $context);
+
+                // Merge back into item, keep original created_at/updated_at/status if present
+                $item['variable_values'] = $evaluated['variable_values'] ?? $rebuiltVariables;
+                $item['samples'] = $evaluated['samples'] ?? $processedSamples;
+                if (isset($evaluated['joint_setting_formula_values'])) {
+                    $item['joint_setting_formula_values'] = $evaluated['joint_setting_formula_values'];
+                }
+                // Preserve existing status if already set; otherwise use evaluated
+                if (!isset($item['status']) && isset($evaluated['status'])) {
+                    $item['status'] = $evaluated['status'];
+                }
+            }
+            unset($item);
+
             return $this->successResponse([
                 'measurement_id' => $measurement->measurement_id,
                 'product_id' => $measurement->product->product_id,
@@ -1940,7 +2003,7 @@ class ProductMeasurementController extends Controller
                 'measurement_status' => $measurement->status,
                 'sample_status' => $measurement->getSampleStatus()->value,
                 'overall_result' => $measurement->overall_result,
-                'measurement_results' => $measurement->measurement_results,
+                'measurement_results' => $measurementResults,
                 'measured_by' => $measurement->measuredBy ? [
                     'username' => $measurement->measuredBy->username,
                     'employee_id' => $measurement->measuredBy->employee_id,
