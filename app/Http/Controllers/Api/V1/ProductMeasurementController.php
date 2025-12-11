@@ -656,10 +656,8 @@ class ProductMeasurementController extends Controller
             // ✅ NEW: Build measurement context dari last_check_data untuk cross-reference (dot notation)
             $measurementContext = $this->buildMeasurementContext($measurement);
             
-            // If variable_values not provided by FE, try to get from saved measurement_results
-            if (empty($variableValues) && isset($measurementPoint['variables'])) {
-                $variableValues = $this->extractVariableValuesFromContext($measurementContext, $measurementPoint['variables']);
-            }
+            // ✅ FIX: Build complete variable_values including FIXED, MANUAL, and FORMULA variables
+            $variableValues = $this->buildCompleteVariableValues($measurementPoint, $variableValues, $measurementContext);
 
             // Process single measurement item
             $measurementItemData = [
@@ -673,6 +671,9 @@ class ProductMeasurementController extends Controller
             
             // Evaluate berdasarkan evaluation type dengan measurement context
             $result = $this->evaluateSampleItem($processedSamples, $measurementPoint, $measurementItemData, $measurementContext);
+            
+            // ✅ FIX: Add measurement_item_name_id to result
+            $result['measurement_item_name_id'] = $request->measurement_item_name_id;
 
             // ✅ Save hasil check sebagai "jejak" untuk comparison nanti
             $this->saveLastCheckData($measurement, $request->measurement_item_name_id, $result);
@@ -689,19 +690,89 @@ class ProductMeasurementController extends Controller
     }
     
     /**
-     * ✅ NEW: Build measurement context dari last_check_data untuk cross-reference
+     * ✅ FIX: Build measurement context dari last_check_data dan measurement_results untuk cross-reference
      * Returns associative array: measurement_item_name_id => measurement_data
+     * Priority: last_check_data > measurement_results (last_check_data is more recent)
      */
     private function buildMeasurementContext(ProductMeasurement $measurement): array
     {
         $context = [];
-        $lastCheckData = $measurement->last_check_data ?? [];
         
+        // ✅ FIX: First, get from measurement_results (saved data)
+        $measurementResults = $measurement->measurement_results ?? [];
+        foreach ($measurementResults as $result) {
+            $itemNameId = $result['measurement_item_name_id'] ?? null;
+            if ($itemNameId) {
+                $context[$itemNameId] = [
+                    'samples' => $result['samples'] ?? [],
+                    'variable_values' => $result['variable_values'] ?? [],
+                    'status' => $result['status'] ?? null,
+                    'joint_setting_formula_values' => $result['joint_setting_formula_values'] ?? null,
+                ];
+            }
+        }
+        
+        // ✅ FIX: Then, override with last_check_data (more recent checked data)
+        $lastCheckData = $measurement->last_check_data ?? [];
         foreach ($lastCheckData as $itemNameId => $itemData) {
             $context[$itemNameId] = $itemData;
         }
         
         return $context;
+    }
+    
+    /**
+     * ✅ FIX: Build complete variable values including FIXED, MANUAL, and FORMULA variables
+     * Supports both function notation avg(thickness_a) and dot notation thickness.average
+     */
+    private function buildCompleteVariableValues(array $measurementPoint, array $manualVariables, array $measurementContext): array
+    {
+        $variableValues = [];
+        $variables = $measurementPoint['variables'] ?? [];
+        
+        // Convert manual variables to map for easy lookup
+        $manualVariablesMap = [];
+        foreach ($manualVariables as $var) {
+            $manualVariablesMap[$var['name_id']] = $var['value'];
+        }
+        
+        foreach ($variables as $variable) {
+            $varName = $variable['name'];
+            $varType = $variable['type'];
+            
+            if ($varType === 'FIXED') {
+                // ✅ FIX: Include FIXED variables
+                $variableValues[] = [
+                    'name_id' => $varName,
+                    'value' => $variable['value']
+                ];
+            } elseif ($varType === 'MANUAL') {
+                // Include MANUAL variables if provided
+                if (isset($manualVariablesMap[$varName])) {
+                    $variableValues[] = [
+                        'name_id' => $varName,
+                        'value' => $manualVariablesMap[$varName]
+                    ];
+                }
+            } elseif ($varType === 'FORMULA' && isset($variable['formula'])) {
+                // ✅ FIX: Calculate FORMULA variables with dot notation support
+                try {
+                    $formulaValue = $this->evaluateFormulaWithContext($variable['formula'], $measurementContext, $manualVariablesMap);
+                    
+                    if ($formulaValue !== null) {
+                        $variableValues[] = [
+                            'name_id' => $varName,
+                            'value' => $formulaValue
+                        ];
+                    }
+                } catch (\Exception $e) {
+                    // Skip if formula can't be evaluated (dependencies not ready)
+                    continue;
+                }
+            }
+        }
+        
+        return $variableValues;
     }
     
     /**
@@ -735,10 +806,11 @@ class ProductMeasurementController extends Controller
     }
     
     /**
-     * ✅ NEW: Evaluate formula with measurement context
-     * Supports: avg(thickness_a), thickness_a.avg, etc.
+     * ✅ FIX: Evaluate formula with measurement context
+     * Supports: avg(thickness_a), thickness.average, etc.
+     * Now includes manual variables for formula calculation
      */
-    private function evaluateFormulaWithContext(string $formula, array $measurementContext): ?float
+    private function evaluateFormulaWithContext(string $formula, array $measurementContext, array $manualVariables = []): ?float
     {
         $executor = new \NXP\MathExecutor();
         $this->registerCustomFunctionsForItem($executor);
@@ -746,13 +818,14 @@ class ProductMeasurementController extends Controller
         // Strip = prefix for execution
         $formula = \App\Helpers\FormulaHelper::stripFormulaPrefix($formula);
         
-        // ✅ Handle dot notation: thickness_a.avg → get value dari context
+        // ✅ FIX: Handle dot notation: thickness.average → get value dari context
+        // Replace dot notation BEFORE setting variables
         preg_match_all('/\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\.\s*([a-zA-Z_][a-zA-Z0-9_]*)\b/', $formula, $matches, PREG_SET_ORDER);
         
         foreach ($matches as $match) {
-            $fullMatch = $match[0]; // e.g., "thickness_a.avg"
-            $measurementItemId = $match[1]; // e.g., "thickness_a"
-            $formulaName = $match[2]; // e.g., "avg"
+            $fullMatch = $match[0]; // e.g., "thickness.average"
+            $measurementItemId = $match[1]; // e.g., "thickness"
+            $formulaName = $match[2]; // e.g., "average"
             
             // Get value from measurement context
             if (isset($measurementContext[$measurementItemId])) {
@@ -761,14 +834,21 @@ class ProductMeasurementController extends Controller
                 // Try to find in joint_setting_formula_values
                 if (isset($itemContext['joint_setting_formula_values'])) {
                     foreach ($itemContext['joint_setting_formula_values'] as $jointFormula) {
-                        if ($jointFormula['name'] === $formulaName && isset($jointFormula['value'])) {
+                        if ($jointFormula['name'] === $formulaName && isset($jointFormula['value']) && is_numeric($jointFormula['value'])) {
                             $value = $jointFormula['value'];
-                            // Replace dot notation with actual value
+                            // Replace dot notation with actual value (wrap in parentheses for safety)
                             $formula = str_replace($fullMatch, (string)$value, $formula);
                             break;
                         }
                     }
                 }
+            }
+        }
+        
+        // ✅ FIX: Set manual variables first (for use in formulas)
+        foreach ($manualVariables as $name => $value) {
+            if (is_numeric($value)) {
+                $executor->setVar($name, $value);
             }
         }
         
@@ -903,14 +983,15 @@ class ProductMeasurementController extends Controller
     }
 
     /**
-     * Evaluate samples for individual measurement item
+     * ✅ FIX: Evaluate samples for individual measurement item
+     * Now returns complete variable_values including FIXED, MANUAL, and FORMULA
      */
     private function evaluateSampleItem(array $processedSamples, array $measurementPoint, array $measurementItem, array $measurementContext = []): array
     {
         $evaluationType = $measurementPoint['evaluation_type'];
         $result = [
             'status' => false,
-            'variable_values' => $measurementItem['variable_values'] ?? [],
+            'variable_values' => $measurementItem['variable_values'] ?? [], // ✅ Already includes all types from buildCompleteVariableValues
             'samples' => $processedSamples,
             'joint_setting_formula_values' => null,
         ];
@@ -921,7 +1002,7 @@ class ProductMeasurementController extends Controller
                 break;
                 
             case 'JOINT':
-                $result = $this->evaluateJointItem($result, $measurementPoint, $processedSamples, $measurementContext);
+                $result = $this->evaluateJointItem($result, $measurementPoint, $processedSamples, $measurementContext, $measurementItem['variable_values'] ?? []);
                 break;
                 
             case 'SKIP_CHECK':
@@ -973,9 +1054,10 @@ class ProductMeasurementController extends Controller
     }
 
     /**
-     * Evaluate joint for individual item
+     * ✅ FIX: Evaluate joint for individual item
+     * Now includes FIXED variables in calculation
      */
-    private function evaluateJointItem(array $result, array $measurementPoint, array $processedSamples, array $measurementContext = []): array
+    private function evaluateJointItem(array $result, array $measurementPoint, array $processedSamples, array $measurementContext = [], array $variableValues = []): array
     {
         $jointSetting = $measurementPoint['evaluation_setting']['joint_setting'];
         $ruleEvaluation = $measurementPoint['rule_evaluation_setting'];
@@ -986,6 +1068,13 @@ class ProductMeasurementController extends Controller
         
         // Register custom functions
         $this->registerCustomFunctionsForItem($executor);
+        
+        // ✅ FIX: Set variable values first (includes FIXED, MANUAL, FORMULA)
+        foreach ($variableValues as $variable) {
+            if (isset($variable['name_id']) && isset($variable['value']) && is_numeric($variable['value'])) {
+                $executor->setVar($variable['name_id'], $variable['value']);
+            }
+        }
         
         // ✅ FIX: Extract RAW VALUES (single_value, before, after) dari samples
         $rawValues = [];
@@ -1042,13 +1131,13 @@ class ProductMeasurementController extends Controller
             $executor->setVar($name, $values);
         }
         
-        // ✅ NEW: Set cross-reference values dari measurement context (dot notation support)
+        // ✅ FIX: Set cross-reference values dari measurement context (dot notation support)
         foreach ($measurementContext as $itemNameId => $itemData) {
-            // For dot notation like thickness_a.avg
+            // For dot notation like thickness.average
             if (isset($itemData['joint_setting_formula_values'])) {
                 foreach ($itemData['joint_setting_formula_values'] as $jointFormula) {
                     if (isset($jointFormula['name']) && isset($jointFormula['value'])) {
-                        // Set as: thickness_a_avg untuk digunakan di formula
+                        // Set as: thickness_average untuk digunakan di formula (dot notation)
                         $varName = $itemNameId . '_' . $jointFormula['name'];
                         $executor->setVar($varName, $jointFormula['value']);
                     }
@@ -1075,11 +1164,11 @@ class ProductMeasurementController extends Controller
                 // ✅ FIX: Strip = prefix before execution
                 $formulaToExecute = \App\Helpers\FormulaHelper::stripFormulaPrefix($formula['formula']);
                 
-                // ✅ NEW: Transform dot notation to variable names
+                // ✅ FIX: Transform dot notation to variable names (thickness.average → thickness_average)
                 preg_match_all('/\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\.\s*([a-zA-Z_][a-zA-Z0-9_]*)\b/', $formulaToExecute, $matches, PREG_SET_ORDER);
                 foreach ($matches as $match) {
-                    $fullMatch = $match[0]; // e.g., "thickness_a.avg"
-                    $varName = $match[1] . '_' . $match[2]; // e.g., "thickness_a_avg"
+                    $fullMatch = $match[0]; // e.g., "thickness.average"
+                    $varName = $match[1] . '_' . $match[2]; // e.g., "thickness_average"
                     $formulaToExecute = str_replace($fullMatch, $varName, $formulaToExecute);
                 }
                 
@@ -1163,7 +1252,8 @@ class ProductMeasurementController extends Controller
     }
 
     /**
-     * Process pre-processing formulas for individual item
+     * ✅ FIX: Process pre-processing formulas for individual item
+     * Now includes all variables (FIXED, MANUAL, FORMULA) in calculation
      */
     private function processPreProcessingFormulasForItem(array $formulas, array $rawValues, array $variables, array $measurementContext = []): array
     {
@@ -1173,7 +1263,7 @@ class ProductMeasurementController extends Controller
         // Register custom functions
         $this->registerCustomFunctionsForItem($executor);
         
-        // ✅ Set measurement context values for cross-reference (dot notation support)
+        // ✅ FIX: Set measurement context values for cross-reference (dot notation support)
         foreach ($measurementContext as $itemNameId => $itemData) {
             // For function notation like avg(thickness_a)
             $sampleValues = [];
@@ -1186,6 +1276,17 @@ class ProductMeasurementController extends Controller
             }
             if (!empty($sampleValues)) {
                 $executor->setVar($itemNameId, $sampleValues);
+            }
+            
+            // ✅ FIX: Also set joint_setting_formula_values for dot notation (thickness.average)
+            if (isset($itemData['joint_setting_formula_values'])) {
+                foreach ($itemData['joint_setting_formula_values'] as $jointFormula) {
+                    if (isset($jointFormula['name']) && isset($jointFormula['value']) && is_numeric($jointFormula['value'])) {
+                        // Set as itemNameId_formulaName for dot notation support
+                        $varName = $itemNameId . '_' . $jointFormula['name'];
+                        $executor->setVar($varName, $jointFormula['value']);
+                    }
+                }
             }
         }
         
@@ -1202,7 +1303,7 @@ class ProductMeasurementController extends Controller
             }
         }
         
-        // Set variable values as variables
+        // ✅ FIX: Set variable values as variables (includes FIXED, MANUAL, FORMULA)
         foreach ($variables as $variable) {
             if (isset($variable['name_id']) && isset($variable['value']) && is_numeric($variable['value'])) {
                 $executor->setVar($variable['name_id'], $variable['value']);
@@ -1214,6 +1315,14 @@ class ProductMeasurementController extends Controller
             try {
                 // ✅ FIX: Strip = prefix before execution
                 $formulaToExecute = \App\Helpers\FormulaHelper::stripFormulaPrefix($formula['formula']);
+                
+                // ✅ FIX: Handle dot notation in pre-processing formulas
+                preg_match_all('/\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\.\s*([a-zA-Z_][a-zA-Z0-9_]*)\b/', $formulaToExecute, $matches, PREG_SET_ORDER);
+                foreach ($matches as $match) {
+                    $fullMatch = $match[0]; // e.g., "thickness.average"
+                    $varName = $match[1] . '_' . $match[2]; // e.g., "thickness_average"
+                    $formulaToExecute = str_replace($fullMatch, $varName, $formulaToExecute);
+                }
                 
                 $result = $executor->execute($formulaToExecute);
                 $results[] = $result;
@@ -1371,6 +1480,15 @@ class ProductMeasurementController extends Controller
     public function saveProgress(Request $request, string $productMeasurementId)
     {
         try {
+            // ✅ FIX: Check if request body is empty or invalid JSON
+            if (empty($request->all())) {
+                return $this->errorResponse(
+                    'Request body kosong atau tidak valid. Pastikan Content-Type: application/json dan payload JSON valid.',
+                    'INVALID_REQUEST_BODY',
+                    400
+                );
+            }
+
             // Find the measurement
             $measurement = ProductMeasurement::where('measurement_id', $productMeasurementId)->first();
 
