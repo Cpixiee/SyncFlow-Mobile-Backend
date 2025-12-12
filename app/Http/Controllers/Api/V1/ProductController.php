@@ -38,7 +38,7 @@ class ProductController extends Controller
                 'measurement_points' => 'required|array|min:1',
                 'measurement_points.*.setup.name' => 'required|string',
                 'measurement_points.*.setup.name_id' => 'nullable|string|regex:/^[a-z][a-z0-9_]*$/',
-                'measurement_points.*.setup.sample_amount' => 'required|integer|min:1',
+                'measurement_points.*.setup.sample_amount' => 'required|integer|min:0', // ✅ Allow 0 for auto-calculate from formula
                 'measurement_points.*.setup.nature' => 'required|in:QUALITATIVE,QUANTITATIVE',
 
                 // source and type are optional for QUALITATIVE, but validated conditionally below
@@ -464,7 +464,7 @@ class ProductController extends Controller
                 'measurement_points' => 'nullable|array',
                 'measurement_points.*.setup.name' => 'required_with:measurement_points|string',
                 'measurement_points.*.setup.name_id' => 'required_with:measurement_points|string|regex:/^[a-zA-Z_]+$/',
-                'measurement_points.*.setup.sample_amount' => 'required_with:measurement_points|integer|min:1',
+                'measurement_points.*.setup.sample_amount' => 'required_with:measurement_points|integer|min:0', // ✅ Allow 0 for auto-calculate from formula
                 'measurement_points.*.setup.nature' => 'required_with:measurement_points|in:QUALITATIVE,QUANTITATIVE',
                 'measurement_points.*.setup.source' => 'nullable|in:MANUAL,DERIVED,TOOL',
                 'measurement_points.*.setup.source_derived_name_id' => 'required_if:measurement_points.*.setup.source,DERIVED|nullable|string',
@@ -636,8 +636,27 @@ class ProductController extends Controller
                 $pointErrors[] = 'Setup name is required';
             }
 
-            if (!isset($setup['sample_amount']) || $setup['sample_amount'] < 1) {
-                $pointErrors[] = 'Sample amount must be at least 1';
+            // ✅ NEW: Allow sample_amount = 0 with special constraints
+            if (!isset($setup['sample_amount']) || $setup['sample_amount'] < 0) {
+                $pointErrors[] = 'Sample amount must be at least 0';
+            }
+
+            // ✅ NEW: Validate constraints for sample_amount = 0
+            if (isset($setup['sample_amount']) && $setup['sample_amount'] === 0) {
+                // Constraint 1: Type must be SINGLE
+                if (isset($setup['type']) && $setup['type'] !== 'SINGLE') {
+                    $pointErrors[] = 'Type must be SINGLE when sample_amount = 0';
+                }
+                
+                // Constraint 2: Evaluation must be JOINT
+                if (isset($point['evaluation_type']) && $point['evaluation_type'] !== 'JOINT') {
+                    $pointErrors[] = 'Evaluation type must be JOINT when sample_amount = 0';
+                }
+                
+                // Constraint 3: Pre-processing formulas cannot be used
+                if (isset($point['pre_processing_formulas']) && !empty($point['pre_processing_formulas'])) {
+                    $pointErrors[] = 'Pre-processing formulas cannot be used when sample_amount = 0';
+                }
             }
 
             // Nature-specific validation
@@ -1240,6 +1259,7 @@ class ProductController extends Controller
      * - BEFORE_AFTER tidak bisa is_raw_data = true
      * - Jika tidak ada pre_processing_formulas, tidak bisa pilih formula di evaluation
      * - pre_processing_formula_name harus ada di pre_processing_formulas
+     * - ✅ NEW: sample_amount = 0 tidak boleh ada pre_processing_formulas
      */
     private function validateTypeSpecificRules(array $measurementPoints): array
     {
@@ -1248,9 +1268,37 @@ class ProductController extends Controller
         foreach ($measurementPoints as $pointIndex => $point) {
             $setup = $point['setup'] ?? [];
             $type = $setup['type'] ?? null;
+            $sampleAmount = $setup['sample_amount'] ?? 1;
             $preProcessingFormulas = $point['pre_processing_formulas'] ?? [];
             $evaluationType = $point['evaluation_type'] ?? '';
             $evaluationSetting = $point['evaluation_setting'] ?? [];
+
+            // ✅ NEW: Rule for sample_amount = 0: tidak boleh ada pre_processing_formulas
+            if ($sampleAmount === 0 && !empty($preProcessingFormulas)) {
+                $errors["measurement_points.{$pointIndex}.pre_processing_formulas"] =
+                    'Pre-processing formulas tidak boleh digunakan ketika sample_amount = 0';
+            }
+
+            // ✅ NEW: Rule for sample_amount = 0: Formula tidak boleh akses single_value, before, atau after
+            if ($sampleAmount === 0 && $evaluationType === 'JOINT') {
+                $jointSetting = $evaluationSetting['joint_setting'] ?? null;
+                if ($jointSetting && isset($jointSetting['formulas']) && is_array($jointSetting['formulas'])) {
+                    $rawValueIdentifiers = ['single_value', 'before', 'after'];
+                    foreach ($jointSetting['formulas'] as $formulaIndex => $formula) {
+                        if (isset($formula['formula'])) {
+                            $formulaStr = $formula['formula'];
+                            // Check if formula contains raw value identifiers
+                            foreach ($rawValueIdentifiers as $rawId) {
+                                // Check for direct reference: single_value, before, after
+                                if (preg_match('/\b' . preg_quote($rawId, '/') . '\b/', $formulaStr)) {
+                                    $errors["measurement_points.{$pointIndex}.evaluation_setting.joint_setting.formulas.{$formulaIndex}.formula"] =
+                                        "Formula tidak boleh mengakses '{$rawId}' ketika sample_amount = 0. Gunakan cross-reference ke measurement items lain (contoh: avg(thickness_a))";
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
             // Rule 1: BEFORE_AFTER wajib ada pre_processing_formulas
             if ($type === 'BEFORE_AFTER') {

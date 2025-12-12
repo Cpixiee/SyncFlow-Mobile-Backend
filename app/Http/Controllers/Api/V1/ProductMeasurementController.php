@@ -586,6 +586,18 @@ class ProductMeasurementController extends Controller
     public function checkSamples(Request $request, string $productMeasurementId)
     {
         try {
+            // ✅ FIX: Validate basic request first (measurement_item_name_id is always required)
+            $basicValidator = Validator::make($request->all(), [
+                'measurement_item_name_id' => 'required|string',
+            ]);
+            
+            if ($basicValidator->fails()) {
+                return $this->validationErrorResponse(
+                    $basicValidator->errors(),
+                    'Request invalid'
+                );
+            }
+            
             // Find the measurement
             $measurement = ProductMeasurement::where('measurement_id', $productMeasurementId)->first();
 
@@ -602,6 +614,52 @@ class ProductMeasurementController extends Controller
             }
 
             $sourceType = $measurementPoint['setup']['source'];
+            $sampleAmount = $measurementPoint['setup']['sample_amount'] ?? 1;
+            
+            // ✅ NEW: Handle sample_amount = 0 (auto-calculate from formula, no sample input needed)
+            // This check must be done BEFORE the normal validation to avoid "samples required" error
+            // Note: sample_amount must be set to 0 in product configuration
+            // Convert to int for comparison (handle both int and string)
+            $sampleAmountInt = (int) $sampleAmount;
+            if ($sampleAmountInt === 0) {
+                // Validate request (samples not required for sample_amount = 0)
+                $validator = Validator::make($request->all(), [
+                    'measurement_item_name_id' => 'required|string',
+                    'variable_values' => 'nullable|array',
+                    'variable_values.*.name_id' => 'required_with:variable_values|string',
+                    'variable_values.*.value' => 'required_with:variable_values|numeric',
+                    'samples' => 'nullable|array', // Optional for sample_amount = 0
+                ]);
+                
+                if ($validator->fails()) {
+                    return $this->validationErrorResponse(
+                        $validator->errors(),
+                        'Request invalid'
+                    );
+                }
+                
+                // Build measurement context untuk cross-reference
+                $measurementContext = $this->buildMeasurementContext($measurement);
+                
+                // Build complete variable_values
+                $variableValues = $this->buildCompleteVariableValues($measurementPoint, $request->variable_values ?? [], $measurementContext);
+                
+                // ✅ NEW: For sample_amount = 0, langsung hitung dari formula tanpa samples
+                $measurementItemData = [
+                    'measurement_item_name_id' => $request->measurement_item_name_id,
+                    'variable_values' => $variableValues,
+                    'samples' => [], // Empty samples for sample_amount = 0
+                ];
+                
+                // Evaluate langsung dari formula (JOINT evaluation)
+                $result = $this->evaluateSampleItem([], $measurementPoint, $measurementItemData, $measurementContext);
+                $result['measurement_item_name_id'] = $request->measurement_item_name_id;
+                
+                // Save hasil check
+                $this->saveLastCheckData($measurement, $request->measurement_item_name_id, $result);
+                
+                return $this->successResponse($result, 'Measurement calculated successfully (sample_amount = 0)');
+            }
             
             // Handle different source types
             switch ($sourceType) {
@@ -628,7 +686,7 @@ class ProductMeasurementController extends Controller
                     ], 'Waiting for derived data');
             }
 
-            // Validate request
+            // Validate request (normal case with samples)
             $validator = Validator::make($request->all(), [
                 'measurement_item_name_id' => 'required|string',
                 'variable_values' => 'nullable|array',
@@ -985,14 +1043,17 @@ class ProductMeasurementController extends Controller
     /**
      * ✅ FIX: Evaluate samples for individual measurement item
      * Now returns complete variable_values including FIXED, MANUAL, and FORMULA
+     * ✅ NEW: Handle sample_amount = 0 (empty samples array)
      */
     private function evaluateSampleItem(array $processedSamples, array $measurementPoint, array $measurementItem, array $measurementContext = []): array
     {
         $evaluationType = $measurementPoint['evaluation_type'];
+        $sampleAmount = $measurementPoint['setup']['sample_amount'] ?? 1;
+        
         $result = [
             'status' => false,
             'variable_values' => $measurementItem['variable_values'] ?? [], // ✅ Already includes all types from buildCompleteVariableValues
-            'samples' => $processedSamples,
+            'samples' => $processedSamples, // ✅ Empty array for sample_amount = 0
             'joint_setting_formula_values' => null,
         ];
 
@@ -1056,11 +1117,13 @@ class ProductMeasurementController extends Controller
     /**
      * ✅ FIX: Evaluate joint for individual item
      * Now includes FIXED variables in calculation
+     * ✅ NEW: Handle sample_amount = 0 (no sample access, only cross-reference)
      */
     private function evaluateJointItem(array $result, array $measurementPoint, array $processedSamples, array $measurementContext = [], array $variableValues = []): array
     {
         $jointSetting = $measurementPoint['evaluation_setting']['joint_setting'];
         $ruleEvaluation = $measurementPoint['rule_evaluation_setting'];
+        $sampleAmount = $measurementPoint['setup']['sample_amount'] ?? 1;
         
         // Process joint formulas
         $jointResults = [];
@@ -1076,59 +1139,62 @@ class ProductMeasurementController extends Controller
             }
         }
         
-        // ✅ FIX: Extract RAW VALUES (single_value, before, after) dari samples
-        $rawValues = [];
-        foreach ($processedSamples as $sample) {
-            // Collect single_value
-            if (isset($sample['single_value']) && is_numeric($sample['single_value'])) {
-                if (!isset($rawValues['single_value'])) {
-                    $rawValues['single_value'] = [];
+        // ✅ NEW: Skip raw values extraction if sample_amount = 0 (constraint: tidak boleh akses single_value)
+        if ($sampleAmount > 0) {
+            // ✅ FIX: Extract RAW VALUES (single_value, before, after) dari samples
+            $rawValues = [];
+            foreach ($processedSamples as $sample) {
+                // Collect single_value
+                if (isset($sample['single_value']) && is_numeric($sample['single_value'])) {
+                    if (!isset($rawValues['single_value'])) {
+                        $rawValues['single_value'] = [];
+                    }
+                    $rawValues['single_value'][] = $sample['single_value'];
                 }
-                $rawValues['single_value'][] = $sample['single_value'];
+                
+                // Collect before_after_value
+                if (isset($sample['before_after_value'])) {
+                    if (isset($sample['before_after_value']['before']) && is_numeric($sample['before_after_value']['before'])) {
+                        if (!isset($rawValues['before'])) {
+                            $rawValues['before'] = [];
+                        }
+                        $rawValues['before'][] = $sample['before_after_value']['before'];
+                    }
+                    if (isset($sample['before_after_value']['after']) && is_numeric($sample['before_after_value']['after'])) {
+                        if (!isset($rawValues['after'])) {
+                            $rawValues['after'] = [];
+                        }
+                        $rawValues['after'][] = $sample['before_after_value']['after'];
+                    }
+                }
             }
             
-            // Collect before_after_value
-            if (isset($sample['before_after_value'])) {
-                if (isset($sample['before_after_value']['before']) && is_numeric($sample['before_after_value']['before'])) {
-                    if (!isset($rawValues['before'])) {
-                        $rawValues['before'] = [];
-                    }
-                    $rawValues['before'][] = $sample['before_after_value']['before'];
-                }
-                if (isset($sample['before_after_value']['after']) && is_numeric($sample['before_after_value']['after'])) {
-                    if (!isset($rawValues['after'])) {
-                        $rawValues['after'] = [];
-                    }
-                    $rawValues['after'][] = $sample['before_after_value']['after'];
-                }
+            // Set raw values as arrays untuk aggregation functions (avg, min, max, sum)
+            foreach ($rawValues as $name => $values) {
+                $executor->setVar($name, $values);
             }
-        }
-        
-        // Set raw values as arrays untuk aggregation functions (avg, min, max, sum)
-        foreach ($rawValues as $name => $values) {
-            $executor->setVar($name, $values);
-        }
-        
-        // Extract all pre_processing_formula_values from samples untuk aggregation
-        $aggregatedValues = [];
-        foreach ($processedSamples as $sample) {
-            if (isset($sample['pre_processing_formula_values'])) {
-                foreach ($sample['pre_processing_formula_values'] as $formulaValue) {
-                    $name = $formulaValue['name'];
-                    if (!isset($aggregatedValues[$name])) {
-                        $aggregatedValues[$name] = [];
-                    }
-                    // Only aggregate non-null values
-                    if ($formulaValue['value'] !== null && is_numeric($formulaValue['value'])) {
-                        $aggregatedValues[$name][] = $formulaValue['value'];
+            
+            // Extract all pre_processing_formula_values from samples untuk aggregation
+            $aggregatedValues = [];
+            foreach ($processedSamples as $sample) {
+                if (isset($sample['pre_processing_formula_values'])) {
+                    foreach ($sample['pre_processing_formula_values'] as $formulaValue) {
+                        $name = $formulaValue['name'];
+                        if (!isset($aggregatedValues[$name])) {
+                            $aggregatedValues[$name] = [];
+                        }
+                        // Only aggregate non-null values
+                        if ($formulaValue['value'] !== null && is_numeric($formulaValue['value'])) {
+                            $aggregatedValues[$name][] = $formulaValue['value'];
+                        }
                     }
                 }
             }
-        }
-        
-        // Set aggregated values as variables (as arrays for avg/min/max functions)
-        foreach ($aggregatedValues as $name => $values) {
-            $executor->setVar($name, $values);
+            
+            // Set aggregated values as variables (as arrays for avg/min/max functions)
+            foreach ($aggregatedValues as $name => $values) {
+                $executor->setVar($name, $values);
+            }
         }
         
         // ✅ FIX: Set cross-reference values dari measurement context (dot notation support)
