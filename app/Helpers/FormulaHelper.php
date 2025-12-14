@@ -120,28 +120,57 @@ class FormulaHelper
      * Extract measurement item references from formula
      * Example: "avg(thickness_a) + avg(thickness_b)" -> ["thickness_a", "thickness_b"]
      * Example: "thickness_a.avg + thickness_b.avg" -> ["thickness_a", "thickness_b"]
+     * Note: Dot notation parts (like "final", "avg" after dot) are NOT included as separate references
      */
     public static function extractMeasurementReferences(string $formula): array
     {
         $references = [];
+        $excludedFromStandalone = []; // Track identifiers that are part of dot notation
         
         // Strip formula prefix if exists
         $formula = self::stripFormulaPrefix($formula);
         
-        // Extract from function calls like avg(thickness_a)
+        // Step 1: Extract from function calls like avg(thickness_a)
         if (preg_match_all('/\b(avg|sum|min|max)\s*\(\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\)/i', $formula, $matches)) {
             $references = array_merge($references, $matches[2]);
         }
         
-        // ✅ NEW: Extract from dot notation like thickness_a.avg or room_temp.fix
-        if (preg_match_all('/\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\.\s*([a-zA-Z_][a-zA-Z0-9_]*)\b/', $formula, $matches)) {
-            $references = array_merge($references, $matches[1]); // Get the measurement item part before the dot
+        // Step 2: Extract from dot notation FIRST and mark formula names to exclude
+        // Example: thickness.final -> extract "thickness", exclude "final" from standalone extraction
+        $dotNotationMatches = [];
+        if (preg_match_all('/\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\.\s*([a-zA-Z_][a-zA-Z0-9_]*)\b/', $formula, $matches, PREG_SET_ORDER)) {
+            foreach ($matches as $match) {
+                $measurementItemId = $match[1]; // e.g., "thickness"
+                $formulaName = $match[2]; // e.g., "final", "avg"
+                $fullDotNotation = $match[0]; // e.g., "thickness.final"
+                
+                // Add measurement item name_id to references
+                $references[] = $measurementItemId;
+                
+                // Mark formula name to exclude from standalone extraction
+                $excludedFromStandalone[$formulaName] = true;
+                
+                // Store for replacement (we'll replace all at once to avoid position shifting issues)
+                $dotNotationMatches[] = $fullDotNotation;
+            }
+            
+            // Replace all dot notations with placeholder to prevent their parts from being extracted
+            // Use preg_replace to handle special characters properly
+            foreach ($dotNotationMatches as $dotNotation) {
+                $formula = preg_replace('/' . preg_quote($dotNotation, '/') . '/', ' ', $formula, 1);
+            }
         }
         
-        // Extract standalone variable references (not in functions)
-        // Look for word patterns that could be measurement item name_ids
+        // Step 3: Extract standalone variable references (NOT in functions, NOT part of dot notation)
+        // After dot notation removal, extract remaining identifiers
         if (preg_match_all('/\b([a-zA-Z_][a-zA-Z0-9_]*)\b/', $formula, $matches)) {
-            foreach ($matches[1] as $match) {
+            foreach ($matches[1] as $identifier) {
+                // CRITICAL: Skip if this identifier was part of dot notation (e.g., "final" from "thickness.final")
+                // This check MUST happen first before adding to references
+                if (isset($excludedFromStandalone[$identifier])) {
+                    continue;
+                }
+                
                 // Skip math function names and operators
                 $mathFunctionsLower = [
                     // Aggregation
@@ -168,8 +197,8 @@ class FormulaHelper
                     'and', 'or', 'not', 'xor'
                 ];
                 
-                if (!in_array(strtolower($match), $mathFunctionsLower)) {
-                    $references[] = $match;
+                if (!in_array(strtolower($identifier), $mathFunctionsLower)) {
+                    $references[] = $identifier;
                 }
             }
         }
@@ -332,4 +361,3 @@ class FormulaHelper
         return $errors;
     }
 }
-

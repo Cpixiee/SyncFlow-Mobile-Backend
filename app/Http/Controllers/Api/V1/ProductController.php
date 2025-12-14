@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Models\Quarter;
+use App\Models\MasterProduct;
 use App\Traits\ApiResponseTrait;
 use App\Helpers\FormulaHelper;
 use Illuminate\Http\Request;
@@ -128,6 +129,12 @@ class ProductController extends Controller
                 return $this->errorResponse('QUANTITATIVE measurement validation failed', 'QUANTITATIVE_VALIDATION_ERROR', 400, $quantitativeErrors);
             }
 
+            // ✅ NEW: Validate QUALITATIVE requirements
+            $qualitativeErrors = $this->validateQualitativeRequirements($measurementPoints);
+            if (!empty($qualitativeErrors)) {
+                return $this->errorResponse('QUALITATIVE measurement validation failed', 'QUALITATIVE_VALIDATION_ERROR', 400, $qualitativeErrors);
+            }
+
             // Validate type-specific rules (BEFORE_AFTER wajib pre-processing, evaluation rules, etc)
             $typeSpecificErrors = $this->validateTypeSpecificRules($measurementPoints);
             if (!empty($typeSpecificErrors)) {
@@ -166,6 +173,7 @@ class ProductController extends Controller
                 'basic_info' => [
                     'product_category_id' => $product->product_category_id,
                     'product_name' => $product->product_name,
+                    'product_spec_name' => $product->product_spec_name,
                     'ref_spec_number' => $product->ref_spec_number,
                     'nom_size_vo' => $product->nom_size_vo,
                     'article_code' => $product->article_code,
@@ -214,6 +222,7 @@ class ProductController extends Controller
                 'basic_info' => [
                     'product_category_id' => $product->product_category_id,
                     'product_name' => $product->product_name,
+                    'product_spec_name' => $product->product_spec_name,
                     'ref_spec_number' => $product->ref_spec_number,
                     'nom_size_vo' => $product->nom_size_vo,
                     'article_code' => $product->article_code,
@@ -309,10 +318,11 @@ class ProductController extends Controller
                 $query->where('product_category_id', $productCategoryId);
             }
 
-            // Search filter
+            // Search filter - prioritize product_spec_name for search
             if ($searchQuery) {
                 $query->where(function($q) use ($searchQuery) {
-                    $q->where('product_name', 'like', "%{$searchQuery}%")
+                    $q->where('product_spec_name', 'like', "%{$searchQuery}%")
+                      ->orWhere('product_name', 'like', "%{$searchQuery}%")
                       ->orWhere('product_id', 'like', "%{$searchQuery}%")
                       ->orWhere('article_code', 'like', "%{$searchQuery}%")
                       ->orWhere('ref_spec_number', 'like', "%{$searchQuery}%");
@@ -328,6 +338,7 @@ class ProductController extends Controller
                         'product_category_id' => $product->product_category_id,
                         'product_category_name' => $product->productCategory->name,
                         'product_name' => $product->product_name,
+                        'product_spec_name' => $product->product_spec_name,
                         'ref_spec_number' => $product->ref_spec_number,
                         'nom_size_vo' => $product->nom_size_vo,
                         'article_code' => $product->article_code,
@@ -402,6 +413,236 @@ class ProductController extends Controller
     /**
      * Delete product
      */
+    /**
+     * Get master products list (only products that haven't been created yet)
+     * GET /api/v1/master-products?product_category_id=1&query=AVSSH
+     */
+    public function getMasterProducts(Request $request)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'product_category_id' => 'nullable|integer|exists:product_categories,id',
+                'query' => 'nullable|string',
+            ]);
+
+            if ($validator->fails()) {
+                return $this->validationErrorResponse($validator->errors());
+            }
+
+            $productCategoryId = $request->input('product_category_id');
+            $searchQuery = $request->input('query');
+            $page = $request->input('page', 1);
+            $limit = $request->input('limit', 10);
+
+            $query = MasterProduct::with('productCategory');
+
+            // Filter by category if provided
+            if ($productCategoryId) {
+                $query->where('product_category_id', $productCategoryId);
+            }
+
+            // Search filter - prioritize product_spec_name for search
+            if ($searchQuery) {
+                $query->where(function($q) use ($searchQuery) {
+                    $q->where('product_spec_name', 'like', "%{$searchQuery}%")
+                      ->orWhere('product_name', 'like', "%{$searchQuery}%")
+                      ->orWhere('article_code', 'like', "%{$searchQuery}%");
+                });
+            }
+
+            // Get all master products
+            $allMasterProducts = $query->get();
+
+            // Filter out products that have already been created (based on product_spec_name)
+            $existingProductSpecNames = Product::whereIn('product_spec_name', $allMasterProducts->pluck('product_spec_name'))
+                ->pluck('product_spec_name')
+                ->toArray();
+
+            $availableMasterProducts = $allMasterProducts->filter(function($masterProduct) use ($existingProductSpecNames) {
+                return !in_array($masterProduct->product_spec_name, $existingProductSpecNames);
+            });
+
+            // Paginate manually
+            $total = $availableMasterProducts->count();
+            $offset = ($page - 1) * $limit;
+            $paginatedProducts = $availableMasterProducts->slice($offset, $limit)->values();
+
+            $transformedProducts = $paginatedProducts->map(function ($masterProduct) {
+                return [
+                    'id' => $masterProduct->id,
+                    'product_category_id' => $masterProduct->product_category_id,
+                    'product_category_name' => $masterProduct->productCategory->name,
+                    'product_name' => $masterProduct->product_name,
+                    'product_spec_name' => $masterProduct->product_spec_name,
+                    'ref_spec_number' => $masterProduct->ref_spec_number,
+                    'nom_size_vo' => $masterProduct->nom_size_vo,
+                    'article_code' => $masterProduct->article_code,
+                    'no_document' => $masterProduct->no_document,
+                    'no_doc_reference' => $masterProduct->no_doc_reference,
+                    'color' => $masterProduct->color,
+                    'size' => $masterProduct->size,
+                ];
+            })->toArray();
+
+            $totalPages = ceil($total / $limit);
+
+            return $this->paginationResponse(
+                $transformedProducts,
+                [
+                    'current_page' => (int)$page,
+                    'total_page' => $totalPages,
+                    'limit' => (int)$limit,
+                    'total_docs' => $total,
+                ]
+            );
+
+        } catch (\Exception $e) {
+            return $this->errorResponse('Error: ' . $e->getMessage(), 'FETCH_ERROR', 500);
+        }
+    }
+
+    /**
+     * Create product from existing master product
+     * POST /api/v1/products/from-existing
+     */
+    public function createFromExisting(Request $request)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'master_product_id' => 'required|integer|exists:master_products,id',
+                'measurement_points' => 'required|array|min:1',
+                'measurement_groups' => 'nullable|array',
+            ]);
+
+            if ($validator->fails()) {
+                return $this->validationErrorResponse($validator->errors());
+            }
+
+            // Get master product
+            $masterProduct = MasterProduct::with('productCategory')->find($request->master_product_id);
+            if (!$masterProduct) {
+                return $this->notFoundResponse('Master product tidak ditemukan');
+            }
+
+            // Check if product with this product_spec_name already exists
+            $existingProduct = Product::where('product_spec_name', $masterProduct->product_spec_name)->first();
+            if ($existingProduct) {
+                return $this->errorResponse(
+                    "Product dengan spesifikasi '{$masterProduct->product_spec_name}' sudah pernah dibuat",
+                    'PRODUCT_ALREADY_EXISTS',
+                    400
+                );
+            }
+
+            // Build basic_info from master product
+            $basicInfo = [
+                'product_category_id' => $masterProduct->product_category_id,
+                'product_name' => $masterProduct->product_name,
+                'product_spec_name' => $masterProduct->product_spec_name,
+                'ref_spec_number' => $masterProduct->ref_spec_number,
+                'nom_size_vo' => $masterProduct->nom_size_vo,
+                'article_code' => $masterProduct->article_code,
+                'no_document' => $masterProduct->no_document,
+                'no_doc_reference' => $masterProduct->no_doc_reference,
+                'color' => $masterProduct->color,
+                'size' => $masterProduct->size,
+            ];
+
+            // Merge with measurement_points from request
+            $measurementPoints = $request->input('measurement_points');
+            $measurementGroups = $request->input('measurement_groups', []);
+
+            // Validate measurement_points (reuse existing validation logic)
+            $measurementPointsValidation = $this->validateMeasurementPoints($measurementPoints);
+            if (!empty($measurementPointsValidation)) {
+                return $this->errorResponse('Measurement points validation failed', 'MEASUREMENT_VALIDATION_ERROR', 400, $measurementPointsValidation);
+            }
+
+            // Auto-generate name_id if not provided
+            $measurementPoints = $this->autoGenerateNameIds($measurementPoints);
+
+            // Validate and process formulas
+            $formulaValidationErrors = $this->validateAndProcessFormulas($measurementPoints);
+            if (!empty($formulaValidationErrors)) {
+                return $this->errorResponse('Formula validation failed', 'FORMULA_VALIDATION_ERROR', 400, $formulaValidationErrors);
+            }
+
+            // Process measurement groups
+            $processedMeasurementPoints = $this->processMeasurementGrouping($measurementPoints, $measurementGroups ?? []);
+
+            // Validate quantitative requirements
+            $quantitativeErrors = $this->validateQuantitativeRequirements($measurementPoints);
+            if (!empty($quantitativeErrors)) {
+                return $this->errorResponse('QUANTITATIVE measurement validation failed', 'QUANTITATIVE_VALIDATION_ERROR', 400, $quantitativeErrors);
+            }
+
+            // Validate qualitative requirements
+            $qualitativeErrors = $this->validateQualitativeRequirements($measurementPoints);
+            if (!empty($qualitativeErrors)) {
+                return $this->errorResponse('QUALITATIVE measurement validation failed', 'QUALITATIVE_VALIDATION_ERROR', 400, $qualitativeErrors);
+            }
+
+            // Validate type-specific rules
+            $typeSpecificErrors = $this->validateTypeSpecificRules($measurementPoints);
+            if (!empty($typeSpecificErrors)) {
+                return $this->errorResponse('Type-specific validation failed', 'TYPE_VALIDATION_ERROR', 400, $typeSpecificErrors);
+            }
+
+            // Validate name uniqueness
+            $nameValidationErrors = $this->validateNameUniqueness($measurementPoints);
+            if (!empty($nameValidationErrors)) {
+                return $this->errorResponse('Name validation failed', 'NAME_UNIQUENESS_ERROR', 400, $nameValidationErrors);
+            }
+
+            // Get active quarter
+            $activeQuarter = Quarter::getActiveQuarter();
+
+            // Create product
+            $product = Product::create([
+                'quarter_id' => $activeQuarter?->id,
+                'product_category_id' => $basicInfo['product_category_id'],
+                'product_name' => $basicInfo['product_name'],
+                'product_spec_name' => $basicInfo['product_spec_name'],
+                'ref_spec_number' => $basicInfo['ref_spec_number'],
+                'nom_size_vo' => $basicInfo['nom_size_vo'],
+                'article_code' => $basicInfo['article_code'],
+                'no_document' => $basicInfo['no_document'],
+                'no_doc_reference' => $basicInfo['no_doc_reference'],
+                'color' => $basicInfo['color'],
+                'size' => $basicInfo['size'],
+                'measurement_points' => $processedMeasurementPoints,
+                'measurement_groups' => $measurementGroups,
+            ]);
+
+            $product->load(['quarter', 'productCategory']);
+
+            return $this->successResponse([
+                'product_id' => $product->product_id,
+                'basic_info' => [
+                    'product_category_id' => $product->product_category_id,
+                    'product_name' => $product->product_name,
+                    'product_spec_name' => $product->product_spec_name,
+                    'ref_spec_number' => $product->ref_spec_number,
+                    'nom_size_vo' => $product->nom_size_vo,
+                    'article_code' => $product->article_code,
+                    'no_document' => $product->no_document,
+                    'no_doc_reference' => $product->no_doc_reference,
+                    'color' => $product->color,
+                    'size' => $product->size,
+                ],
+                'measurement_points' => $product->measurement_points,
+                'measurement_groups' => $product->measurement_groups,
+                'product_category' => [
+                    'id' => $masterProduct->productCategory->id,
+                    'name' => $masterProduct->productCategory->name
+                ]
+            ], 'Product berhasil dibuat dari master product', 201);
+
+        } catch (\Exception $e) {
+            return $this->errorResponse('Error: ' . $e->getMessage(), 'CREATION_ERROR', 500);
+        }
+    }
+
     public function destroy(string $productId)
     {
         try {
@@ -565,6 +806,12 @@ class ProductController extends Controller
                     return $this->errorResponse('QUANTITATIVE measurement validation failed', 'QUANTITATIVE_VALIDATION_ERROR', 400, $quantitativeErrors);
                 }
 
+                // ✅ NEW: Validate QUALITATIVE requirements
+                $qualitativeErrors = $this->validateQualitativeRequirements($measurementPoints);
+                if (!empty($qualitativeErrors)) {
+                    return $this->errorResponse('QUALITATIVE measurement validation failed', 'QUALITATIVE_VALIDATION_ERROR', 400, $qualitativeErrors);
+                }
+
                 // Validate type-specific rules
                 $typeSpecificErrors = $this->validateTypeSpecificRules($measurementPoints);
                 if (!empty($typeSpecificErrors)) {
@@ -595,6 +842,7 @@ class ProductController extends Controller
                 'basic_info' => [
                     'product_category_id' => $product->product_category_id,
                     'product_name' => $product->product_name,
+                    'product_spec_name' => $product->product_spec_name,
                     'ref_spec_number' => $product->ref_spec_number,
                     'nom_size_vo' => $product->nom_size_vo,
                     'article_code' => $product->article_code,
@@ -662,15 +910,19 @@ class ProductController extends Controller
             // Nature-specific validation
             if (isset($setup['nature'])) {
                 if ($setup['nature'] === 'QUANTITATIVE') {
-                    // Quantitative must have rule_evaluation_setting
-                    if (!isset($point['rule_evaluation_setting']) || empty($point['rule_evaluation_setting'])) {
-                        $pointErrors[] = 'Rule evaluation setting is required for QUANTITATIVE nature';
-                    } else {
-                        $ruleErrors = $this->validateRuleEvaluation($point['rule_evaluation_setting']);
-                        if (!empty($ruleErrors)) {
-                            $pointErrors = array_merge($pointErrors, $ruleErrors);
+                    // Quantitative must have rule_evaluation_setting UNLESS evaluation_type is SKIP_CHECK
+                    $evaluationType = $point['evaluation_type'] ?? null;
+                    if ($evaluationType !== 'SKIP_CHECK') {
+                        if (!isset($point['rule_evaluation_setting']) || empty($point['rule_evaluation_setting'])) {
+                            $pointErrors[] = 'Rule evaluation setting is required for QUANTITATIVE nature';
+                        } else {
+                            $ruleErrors = $this->validateRuleEvaluation($point['rule_evaluation_setting']);
+                            if (!empty($ruleErrors)) {
+                                $pointErrors = array_merge($pointErrors, $ruleErrors);
+                            }
                         }
                     }
+                    // For SKIP_CHECK, rule_evaluation_setting is optional (can be null/omitted)
 
                     // Qualitative setting must be null for quantitative
                     if (isset($point['evaluation_setting']['qualitative_setting']) && $point['evaluation_setting']['qualitative_setting'] !== null) {
@@ -687,15 +939,10 @@ class ProductController extends Controller
                         }
                     }
 
-                    // Rule evaluation must be null for qualitative
-                    if (isset($point['rule_evaluation_setting']) && $point['rule_evaluation_setting'] !== null) {
-                        $pointErrors[] = 'Rule evaluation setting must be null for QUALITATIVE nature';
-                    }
-
-                    // For qualitative, evaluation_type should be SKIP_CHECK
-                    if (isset($point['evaluation_type']) && $point['evaluation_type'] !== 'SKIP_CHECK') {
-                        $pointErrors[] = 'Evaluation type must be SKIP_CHECK for QUALITATIVE nature';
-                    }
+                    // ✅ REMOVED: Validasi lama yang bertentangan dengan requirement baru
+                    // Validasi untuk QUALITATIVE (evaluation_type, rule_evaluation_setting, sample_amount)
+                    // sekarang ditangani oleh validateQualitativeRequirements() method
+                    // yang lebih spesifik dan sesuai dengan requirement terbaru
                 }
             }
 
@@ -1131,6 +1378,7 @@ class ProductController extends Controller
 
     /**
      * Validate QUANTITATIVE measurements have required source and type
+     * Note: source and type are optional for sample_amount = 0 (auto-calculated from formula)
      */
     private function validateQuantitativeRequirements(array $measurementPoints): array
     {
@@ -1139,15 +1387,63 @@ class ProductController extends Controller
         foreach ($measurementPoints as $index => $point) {
             $setup = $point['setup'] ?? [];
             $nature = $setup['nature'] ?? '';
+            $sampleAmount = $setup['sample_amount'] ?? 1;
 
-            // For QUANTITATIVE, source and type must be present
+            // For QUANTITATIVE:
+            // - If sample_amount > 0: source and type are REQUIRED
+            // - If sample_amount = 0: source is NOT required (will be auto-calculated), but type is still required (must be SINGLE)
             if ($nature === 'QUANTITATIVE') {
-                if (!isset($setup['source']) || empty($setup['source'])) {
-                    $errors["measurement_points.{$index}.setup.source"] = 'Source is required for QUANTITATIVE nature';
+                if ($sampleAmount > 0) {
+                    // For sample_amount > 0, source and type are both required
+                    if (!isset($setup['source']) || empty($setup['source'])) {
+                        $errors["measurement_points.{$index}.setup.source"] = 'Source is required for QUANTITATIVE nature when sample_amount > 0';
+                    }
+
+                    if (!isset($setup['type']) || empty($setup['type'])) {
+                        $errors["measurement_points.{$index}.setup.type"] = 'Type is required for QUANTITATIVE nature when sample_amount > 0';
+                    }
+                } else {
+                    // For sample_amount = 0, source is NOT required, but type should still be present (will be validated elsewhere)
+                    // We don't require source here because it will be auto-calculated from formula
+                    // Type is still validated in validateMeasurementPoints to ensure it's SINGLE
+                }
+            }
+        }
+
+        return $errors;
+    }
+
+    /**
+     * Validate QUALITATIVE measurement requirements
+     * - sample_amount can be any number (1, 4, 5, 10, etc.)
+     * - evaluation_type must be PER_SAMPLE (cannot be SKIP_CHECK or JOINT)
+     * - rule_evaluation_setting is required (PER_SAMPLE always needs rules)
+     */
+    private function validateQualitativeRequirements(array $measurementPoints): array
+    {
+        $errors = [];
+
+        foreach ($measurementPoints as $index => $point) {
+            $setup = $point['setup'] ?? [];
+            $nature = $setup['nature'] ?? '';
+            $sampleAmount = $setup['sample_amount'] ?? null;
+            $evaluationType = $point['evaluation_type'] ?? null;
+            $ruleEvaluation = $point['rule_evaluation_setting'] ?? null;
+
+            if ($nature === 'QUALITATIVE') {
+                // 1. sample_amount must be >= 1 for QUALITATIVE (can be 1, 4, 5, 10, etc.)
+                if ($sampleAmount === null || $sampleAmount < 1) {
+                    $errors["measurement_points.{$index}.setup.sample_amount"] = 'QUALITATIVE nature requires sample_amount to be at least 1';
                 }
 
-                if (!isset($setup['type']) || empty($setup['type'])) {
-                    $errors["measurement_points.{$index}.setup.type"] = 'Type is required for QUANTITATIVE nature';
+                // 2. evaluation_type must be PER_SAMPLE (cannot be SKIP_CHECK or JOINT)
+                if ($evaluationType !== 'PER_SAMPLE') {
+                    $errors["measurement_points.{$index}.evaluation_type"] = 'QUALITATIVE nature requires evaluation_type to be PER_SAMPLE (cannot be SKIP_CHECK or JOINT)';
+                }
+
+                // 3. rule_evaluation_setting is required for PER_SAMPLE (always needs rules)
+                if ($evaluationType === 'PER_SAMPLE' && !$ruleEvaluation) {
+                    $errors["measurement_points.{$index}.rule_evaluation_setting"] = 'rule_evaluation_setting is required for QUALITATIVE nature with PER_SAMPLE evaluation';
                 }
             }
         }
@@ -1231,13 +1527,12 @@ class ProductController extends Controller
             }
 
             // Validate rule_evaluation_setting based on nature
+            // ✅ FIX: QUALITATIVE now requires rule_evaluation_setting (because it must be PER_SAMPLE)
             if (isset($setup['nature'])) {
                 if ($setup['nature'] === 'QUALITATIVE') {
-                    if ($ruleEvaluation !== null) {
-                        $errors["measurement_point_{$pointIndex}"] = 'rule_evaluation_setting must be null for QUALITATIVE nature';
-                    }
-
-                    // Validate qualitative_setting exists
+                    // ✅ FIX: QUALITATIVE with PER_SAMPLE requires rule_evaluation_setting
+                    // This validation is now handled in validateQualitativeRequirements()
+                    // But we still validate qualitative_setting exists
                     if (!isset($evaluationSetting['qualitative_setting'])) {
                         $errors["measurement_point_{$pointIndex}"] = 'qualitative_setting is required for QUALITATIVE nature';
                     }

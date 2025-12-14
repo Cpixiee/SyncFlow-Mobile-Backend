@@ -8,6 +8,7 @@ use App\Models\Product;
 use App\Enums\MeasurementType;
 use App\Enums\SampleStatus;
 use App\Traits\ApiResponseTrait;
+use App\Helpers\StatisticalHelper;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Tymon\JWTAuth\Facades\JWTAuth;
@@ -180,7 +181,8 @@ class ProductMeasurementController extends Controller
 
             if ($query) {
                 $productsQuery->where(function($q) use ($query) {
-                    $q->where('products.product_name', 'like', "%{$query}%")
+                    $q->where('products.product_spec_name', 'like', "%{$query}%")
+                      ->orWhere('products.product_name', 'like', "%{$query}%")
                       ->orWhere('products.product_id', 'like', "%{$query}%")
                       ->orWhere('products.article_code', 'like', "%{$query}%")
                       ->orWhere('products.ref_spec_number', 'like', "%{$query}%");
@@ -610,11 +612,26 @@ class ProductMeasurementController extends Controller
             $measurementPoint = $product->getMeasurementPointByNameId($request->measurement_item_name_id);
             
             if (!$measurementPoint) {
-                return $this->notFoundResponse("Measurement point tidak ditemukan: {$request->measurement_item_name_id}");
+                // Get available measurement item name_ids for better error message
+                $availableNameIds = $product->getAvailableSourceDerivedIds();
+                $availableNameIdsStr = !empty($availableNameIds) ? implode(', ', $availableNameIds) : 'tidak ada';
+                
+                return $this->notFoundResponse(
+                    "Measurement point tidak ditemukan: '{$request->measurement_item_name_id}'. " .
+                    "Measurement items yang tersedia: {$availableNameIdsStr}"
+                );
             }
 
-            $sourceType = $measurementPoint['setup']['source'];
+            // ✅ FIX: Check nature first - QUALITATIVE measurements don't require source
+            $nature = $measurementPoint['setup']['nature'] ?? null;
+            $sourceType = $measurementPoint['setup']['source'] ?? null;
             $sampleAmount = $measurementPoint['setup']['sample_amount'] ?? 1;
+            
+            // ✅ FIX: For QUALITATIVE measurements, source is optional - default to MANUAL if not provided
+            // Source is only required for QUANTITATIVE measurements
+            if ($nature === 'QUALITATIVE' && $sourceType === null) {
+                $sourceType = 'MANUAL'; // Default for qualitative
+            }
             
             // ✅ NEW: Handle sample_amount = 0 (auto-calculate from formula, no sample input needed)
             // This check must be done BEFORE the normal validation to avoid "samples required" error
@@ -661,29 +678,39 @@ class ProductMeasurementController extends Controller
                 return $this->successResponse($result, 'Measurement calculated successfully (sample_amount = 0)');
             }
             
-            // Handle different source types
-            switch ($sourceType) {
-                case 'MANUAL':
-                    // User input manual - validate samples required
-                    break;
-                case 'INSTRUMENT':
-                    // Auto dari IoT/alat ukur - samples bisa kosong karena akan diambil otomatis
-                    return $this->successResponse([
-                        'status' => null,
-                        'message' => 'Measurement akan diambil otomatis dari alat ukur IoT',
-                        'source_type' => 'INSTRUMENT',
-                        'samples' => []
-                    ], 'Waiting for instrument data');
-                case 'DERIVED':
-                    // Auto dari measurement item lain - samples akan dihitung otomatis
-                    $derivedFromId = $measurementPoint['setup']['source_derived_name_id'];
-                    return $this->successResponse([
-                        'status' => null,
-                        'message' => "Measurement akan diambil otomatis dari: {$derivedFromId}",
-                        'source_type' => 'DERIVED',
-                        'derived_from' => $derivedFromId,
-                        'samples' => []
-                    ], 'Waiting for derived data');
+            // Handle different source types (only for QUANTITATIVE measurements)
+            // ✅ FIX: Skip source type check for QUALITATIVE measurements as they always use MANUAL input
+            if ($nature !== 'QUALITATIVE' && $sourceType !== null) {
+                switch ($sourceType) {
+                    case 'MANUAL':
+                        // User input manual - validate samples required
+                        break;
+                    case 'INSTRUMENT':
+                        // Auto dari IoT/alat ukur - samples bisa kosong karena akan diambil otomatis
+                        return $this->successResponse([
+                            'status' => null,
+                            'message' => 'Measurement akan diambil otomatis dari alat ukur IoT',
+                            'source_type' => 'INSTRUMENT',
+                            'samples' => []
+                        ], 'Waiting for instrument data');
+                    case 'DERIVED':
+                        // Auto dari measurement item lain - samples akan dihitung otomatis
+                        $derivedFromId = $measurementPoint['setup']['source_derived_name_id'] ?? null;
+                        if (!$derivedFromId) {
+                            return $this->errorResponse(
+                                'source_derived_name_id is required for DERIVED source type',
+                                'MISSING_DERIVED_SOURCE',
+                                400
+                            );
+                        }
+                        return $this->successResponse([
+                            'status' => null,
+                            'message' => "Measurement akan diambil otomatis dari: {$derivedFromId}",
+                            'source_type' => 'DERIVED',
+                            'derived_from' => $derivedFromId,
+                            'samples' => []
+                        ], 'Waiting for derived data');
+                }
             }
 
             // Validate request (normal case with samples)
@@ -1011,10 +1038,20 @@ class ProductMeasurementController extends Controller
             // Process pre-processing formulas jika ada
             if (isset($measurementPoint['pre_processing_formulas']) && !empty($measurementPoint['pre_processing_formulas'])) {
                 $rawValues = [];
-                if ($setup['type'] === 'SINGLE') {
-                    $rawValues['single_value'] = $sample['single_value'];
-                } elseif ($setup['type'] === 'BEFORE_AFTER') {
-                    $rawValues['before_after_value'] = $sample['before_after_value'];
+                $type = $setup['type'] ?? null;
+                
+                // ✅ FIX: Type is only required for QUANTITATIVE measurements
+                // For QUALITATIVE, we still process raw values if needed
+                if ($type === 'SINGLE') {
+                    $rawValues['single_value'] = $sample['single_value'] ?? null;
+                } elseif ($type === 'BEFORE_AFTER') {
+                    $rawValues['before_after_value'] = $sample['before_after_value'] ?? null;
+                }
+                
+                // ✅ FIX: For QUALITATIVE, add qualitative_value to rawValues if present
+                $nature = $setup['nature'] ?? null;
+                if ($nature === 'QUALITATIVE' && isset($sample['qualitative_value'])) {
+                    $rawValues['qualitative_value'] = $sample['qualitative_value'];
                 }
 
                 $processedFormulas = $this->processPreProcessingFormulasForItem(
@@ -1648,6 +1685,20 @@ class ProductMeasurementController extends Controller
             $changedItems = [];
             $needReCheckItems = []; // Level 1: Raw data changed but not re-checked
             
+            // ✅ FIX: Build initial context from existing results
+            $workingContext = [];
+            foreach ($existingResults as $result) {
+                $itemNameId = $result['measurement_item_name_id'] ?? null;
+                if ($itemNameId) {
+                    $workingContext[$itemNameId] = [
+                        'samples' => $result['samples'] ?? [],
+                        'variable_values' => $result['variable_values'] ?? [],
+                        'status' => $result['status'] ?? null,
+                        'joint_setting_formula_values' => $result['joint_setting_formula_values'] ?? null,
+                    ];
+                }
+            }
+            
             // Merge new results with existing
             foreach ($newResults as $newResult) {
                 $itemNameId = $newResult['measurement_item_name_id'];
@@ -1728,8 +1779,10 @@ class ProductMeasurementController extends Controller
                             $processedSamples = [];
                             $variableValues = $newResult['variable_values'] ?? [];
                             
-                            // Build measurement context for cross-reference
-                            $measurementContext = $this->buildMeasurementContext($measurement);
+                            // ✅ FIX: Use working context (updated as we process items) instead of building fresh
+                            // This ensures dependencies are available from previously processed items
+                            // Build complete variable values once for all samples
+                            $preprocessingCompleteVariables = $this->buildCompleteVariableValues($measurementPoint, $variableValues, $workingContext);
                             
                             foreach ($newSamples as $sample) {
                                 $rawValues = [];
@@ -1745,8 +1798,8 @@ class ProductMeasurementController extends Controller
                                 $processedFormulas = $this->processPreProcessingFormulasForItem(
                                     $measurementPoint['pre_processing_formulas'],
                                     $rawValues,
-                                    $variableValues,
-                                    $measurementContext
+                                    $preprocessingCompleteVariables,
+                                    $workingContext
                                 );
                                 
                                 // Add preprocessing formula values to sample
@@ -1774,6 +1827,45 @@ class ProductMeasurementController extends Controller
                     }
                 }
 
+                // ✅ FIX: Build complete variable values once (reuse if already built for preprocessing)
+                $finalVariableValues = $newResult['variable_values'] ?? [];
+                if ($measurementPoint) {
+                    try {
+                        // ✅ FIX: Use working context, reuse if already computed during preprocessing
+                        if (isset($preprocessingCompleteVariables)) {
+                            $finalVariableValues = $preprocessingCompleteVariables;
+                        } else {
+                            $finalVariableValues = $this->buildCompleteVariableValues($measurementPoint, $finalVariableValues, $workingContext);
+                        }
+                    } catch (\Exception $e) {
+                        // Continue with original values if rebuild fails
+                    }
+                }
+
+                // ✅ FIX: Recompute joint_setting_formula_values if not provided and needed
+                $jointFormulaValues = $newResult['joint_setting_formula_values'] ?? null;
+                if (!$jointFormulaValues && $measurementPoint && isset($measurementPoint['evaluation_setting']['joint_setting'])) {
+                    // Need to recompute joint formulas
+                    try {
+                        // Build measurement item data (use finalVariableValues which includes complete values)
+                        $measurementItemData = [
+                            'measurement_item_name_id' => $itemNameId,
+                            'variable_values' => $finalVariableValues,
+                            'samples' => $newSamples,
+                        ];
+                        
+                        // Evaluate to get joint_setting_formula_values
+                        $evaluated = $this->evaluateSampleItem($newSamples, $measurementPoint, $measurementItemData, $workingContext);
+                        
+                        if (isset($evaluated['joint_setting_formula_values'])) {
+                            $jointFormulaValues = $evaluated['joint_setting_formula_values'];
+                        }
+                    } catch (\Exception $e) {
+                        // If recompute fails, continue with null (will be recomputed on show)
+                        // Don't fail the save operation
+                    }
+                }
+
                 // Update or add result
                 if (isset($existingResultsMap[$itemNameId])) {
                     $key = $existingResultsMap[$itemNameId]['key'];
@@ -1783,9 +1875,9 @@ class ProductMeasurementController extends Controller
                     $existingResults[$key] = [
                         'measurement_item_name_id' => $itemNameId,
                         'status' => $newResult['status'] ?? null,
-                        'variable_values' => $newResult['variable_values'] ?? [],
+                        'variable_values' => $finalVariableValues,
                         'samples' => $newSamples,
-                        'joint_setting_formula_values' => $newResult['joint_setting_formula_values'] ?? null,
+                        'joint_setting_formula_values' => $jointFormulaValues,
                         'created_at' => $oldData['created_at'] ?? now()->toISOString(),
                         'updated_at' => now()->toISOString(),
                     ];
@@ -1800,13 +1892,21 @@ class ProductMeasurementController extends Controller
                     $existingResults[] = [
                         'measurement_item_name_id' => $itemNameId,
                         'status' => $newResult['status'] ?? null,
-                        'variable_values' => $newResult['variable_values'] ?? [],
+                        'variable_values' => $finalVariableValues,
                         'samples' => $newSamples,
-                        'joint_setting_formula_values' => $newResult['joint_setting_formula_values'] ?? null,
+                        'joint_setting_formula_values' => $jointFormulaValues,
                         'created_at' => now()->toISOString(),
                         'updated_at' => now()->toISOString(),
                     ];
                 }
+                
+                // ✅ FIX: Update working context after processing this item so next items can use it
+                $workingContext[$itemNameId] = [
+                    'samples' => $newSamples,
+                    'variable_values' => $finalVariableValues,
+                    'status' => $newResult['status'] ?? null,
+                    'joint_setting_formula_values' => $jointFormulaValues,
+                ];
             }
             
             // Level 1 Validation: Check if any items need re-check (raw data changed but not validated)
@@ -2019,7 +2119,8 @@ class ProductMeasurementController extends Controller
                 }
             }
 
-            // Recompute missing variable_values, pre_processing_formula_values, and joint formulas per measurement item
+            // ✅ FIX: Recompute missing variable_values, pre_processing_formula_values, and joint formulas
+            // Update context after each item so dependencies are available for subsequent items
             foreach ($measurementResults as &$item) {
                 $itemId = $item['measurement_item_name_id'] ?? null;
                 if (!$itemId || !isset($measurementPointMap[$itemId])) {
@@ -2027,9 +2128,8 @@ class ProductMeasurementController extends Controller
                 }
 
                 $point = $measurementPointMap[$itemId];
-                $hasPreProcessing = isset($point['pre_processing_formulas']) && !empty($point['pre_processing_formulas']);
 
-                // Rebuild variable_values (include FIXED, MANUAL, FORMULA)
+                // Rebuild variable_values (include FIXED, MANUAL, FORMULA) using current context
                 $currentVariables = $item['variable_values'] ?? [];
                 $rebuiltVariables = $this->buildCompleteVariableValues($point, $currentVariables, $context);
 
@@ -2056,6 +2156,14 @@ class ProductMeasurementController extends Controller
                 if (!isset($item['status']) && isset($evaluated['status'])) {
                     $item['status'] = $evaluated['status'];
                 }
+                
+                // ✅ FIX: Update context after recompute so next items can use the updated values
+                $context[$itemId] = [
+                    'samples' => $item['samples'],
+                    'variable_values' => $item['variable_values'],
+                    'status' => $item['status'] ?? null,
+                    'joint_setting_formula_values' => $item['joint_setting_formula_values'] ?? null,
+                ];
             }
             unset($item);
 
@@ -2083,6 +2191,411 @@ class ProductMeasurementController extends Controller
             return $this->errorResponse(
                 'Error fetching measurement: ' . $e->getMessage(),
                 'MEASUREMENT_FETCH_ERROR',
+                500
+            );
+        }
+    }
+
+    /**
+     * Get product measurements grouped by quarter and year for a product
+     * Endpoint: GET /product-measurement/by-product?product_id=xxx
+     */
+    public function getByProduct(Request $request)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'product_id' => 'required|string',
+            ]);
+
+            if ($validator->fails()) {
+                return $this->validationErrorResponse($validator->errors());
+            }
+
+            $productId = $request->input('product_id');
+            $product = Product::where('product_id', $productId)->first();
+
+            if (!$product) {
+                return $this->notFoundResponse('Product tidak ditemukan');
+            }
+
+            // Get all product measurements for this product
+            // Include measurements with batch_number (required for display)
+            // due_date is used for quarter calculation, but we'll try to derive from other sources if missing
+            $measurements = ProductMeasurement::where('product_id', $product->id)
+                ->whereNotNull('batch_number') // Batch number is required
+                ->with('product.quarter')
+                ->orderBy('due_date', 'desc')
+                ->orderBy('created_at', 'desc')
+                ->get();
+
+            // Group by quarter and year
+            $grouped = [];
+            foreach ($measurements as $measurement) {
+                // Try to get quarter from product first, otherwise calculate from due_date
+                $quarter = $measurement->product->quarter;
+                $quarterNum = null;
+                $year = null;
+                
+                if ($quarter) {
+                    // Use quarter from product
+                    $quarterNumber = $quarter->name; // e.g., "Q1", "Q2", etc.
+                    $year = $quarter->year;
+                    $quarterNum = (int) str_replace('Q', '', $quarterNumber);
+                } elseif ($measurement->due_date) {
+                    // Calculate quarter from due_date
+                    $dueDate = \Carbon\Carbon::parse($measurement->due_date);
+                    $year = $dueDate->year;
+                    $month = $dueDate->month;
+                    
+                    // Calculate quarter from month
+                    if ($month >= 1 && $month <= 3) {
+                        $quarterNum = 1;
+                    } elseif ($month >= 4 && $month <= 6) {
+                        $quarterNum = 2;
+                    } elseif ($month >= 7 && $month <= 9) {
+                        $quarterNum = 3;
+                    } else {
+                        $quarterNum = 4;
+                    }
+                } elseif ($measurement->created_at) {
+                    // Fallback: Use created_at to determine quarter and year
+                    $createdAt = \Carbon\Carbon::parse($measurement->created_at);
+                    $year = $createdAt->year;
+                    $month = $createdAt->month;
+                    
+                    // Calculate quarter from month
+                    if ($month >= 1 && $month <= 3) {
+                        $quarterNum = 1;
+                    } elseif ($month >= 4 && $month <= 6) {
+                        $quarterNum = 2;
+                    } elseif ($month >= 7 && $month <= 9) {
+                        $quarterNum = 3;
+                    } else {
+                        $quarterNum = 4;
+                    }
+                }
+                
+                // Skip if we still can't determine quarter and year
+                if (!$quarterNum || !$year) {
+                    continue;
+                }
+                
+                $key = "{$year}-Q{$quarterNum}";
+                
+                if (!isset($grouped[$key])) {
+                    $grouped[$key] = [
+                        'quarter' => $quarterNum,
+                        'year' => $year,
+                        'product_measurements' => [],
+                    ];
+                }
+
+                $grouped[$key]['product_measurements'][] = [
+                    'product_measurement_id' => $measurement->measurement_id,
+                    'batch_number' => $measurement->batch_number,
+                    'finished' => $measurement->status === 'COMPLETED',
+                ];
+            }
+
+            // Convert to indexed array and sort by year desc, quarter desc
+            $docs = array_values($grouped);
+            usort($docs, function($a, $b) {
+                if ($a['year'] !== $b['year']) {
+                    return $b['year'] - $a['year']; // Descending year
+                }
+                return $b['quarter'] - $a['quarter']; // Descending quarter
+            });
+
+            return $this->successResponse([
+                'docs' => $docs,
+            ], 'Product measurements retrieved successfully');
+
+        } catch (\Exception $e) {
+            return $this->errorResponse(
+                'Error fetching product measurements: ' . $e->getMessage(),
+                'PRODUCT_MEASUREMENTS_FETCH_ERROR',
+                500
+            );
+        }
+    }
+
+    /**
+     * Get detailed measurement result with sigma, CP, CPK calculations
+     * Endpoint: GET /product-measurement/:product_measurement_id/result
+     */
+    public function getResult(string $productMeasurementId)
+    {
+        try {
+            $measurement = ProductMeasurement::with(['product', 'measuredBy'])
+                ->where('measurement_id', $productMeasurementId)
+                ->first();
+
+            if (!$measurement) {
+                return $this->notFoundResponse('Product measurement tidak ditemukan');
+            }
+
+            $measurementResults = $measurement->measurement_results ?? [];
+            $product = $measurement->product;
+            $measurementPoints = $product->measurement_points ?? [];
+
+            // Build measurement point map
+            $measurementPointMap = [];
+            foreach ($measurementPoints as $point) {
+                if (isset($point['setup']['name_id'])) {
+                    $measurementPointMap[$point['setup']['name_id']] = $point;
+                }
+            }
+
+            // Calculate summary statistics
+            $totalSamples = 0;
+            $okCount = 0;
+            $ngCount = 0;
+
+            $measurementPointResults = [];
+            foreach ($measurementResults as $item) {
+                $itemNameId = $item['measurement_item_name_id'] ?? null;
+                if (!$itemNameId || !isset($measurementPointMap[$itemNameId])) {
+                    continue;
+                }
+
+                $point = $measurementPointMap[$itemNameId];
+                $samples = $item['samples'] ?? [];
+                $evaluationType = $point['evaluation_type'] ?? null;
+                $nature = $point['setup']['nature'] ?? null;
+
+                // Process samples for this measurement point
+                $sampleAmount = count($samples);
+                $pointOkCount = 0;
+                $pointNgCount = 0;
+                $values = []; // For statistical calculations (only for PER_SAMPLE QUANTITATIVE)
+
+                $processedSamples = [];
+                foreach ($samples as $sample) {
+                    $sampleIndex = $sample['sample_index'] ?? null;
+                    $sampleStatus = $sample['status'] ?? null;
+                    
+                    // ✅ FIX: Handle status - could be boolean true/false or null
+                    // Convert to boolean for comparison
+                    $isOk = ($sampleStatus === true || $sampleStatus === 'ok' || $sampleStatus === 1);
+                    $isNg = ($sampleStatus === false || $sampleStatus === 'ng' || $sampleStatus === 0);
+                    
+                    // Determine status based on evaluation type
+                    if ($evaluationType === 'PER_SAMPLE' && $nature === 'QUANTITATIVE') {
+                        if ($isOk) {
+                            $pointOkCount++;
+                            $okCount++;
+                        } elseif ($isNg) {
+                            $pointNgCount++;
+                            $ngCount++;
+                        } else {
+                            // Status null/unknown - count as NG for safety
+                            $pointNgCount++;
+                            $ngCount++;
+                        }
+                        
+                        // Collect values for statistical calculations (PER_SAMPLE only)
+                        $singleValue = $sample['single_value'] ?? null;
+                        if ($singleValue !== null && is_numeric($singleValue)) {
+                            $values[] = (float)$singleValue;
+                        }
+                    } elseif ($evaluationType === 'JOINT' && $nature === 'QUANTITATIVE') {
+                        // For JOINT, all samples share the same status (based on final value evaluation)
+                        // Don't count here, will be counted after loop based on item status
+                        // But still collect values for potential statistical calculations
+                        $singleValue = $sample['single_value'] ?? null;
+                        if ($singleValue !== null && is_numeric($singleValue)) {
+                            $values[] = (float)$singleValue;
+                        }
+                    } elseif ($evaluationType === 'SKIP_CHECK') {
+                        // ✅ FIX: SKIP_CHECK means no checking is performed - don't count OK or NG
+                        // Just collect data, no evaluation
+                        // Do nothing - don't increment okCount or ngCount
+                    } elseif ($nature === 'QUALITATIVE') {
+                        // For QUALITATIVE, count based on actual sample status
+                        if ($isOk) {
+                            $pointOkCount++;
+                            $okCount++;
+                        } elseif ($isNg) {
+                            $pointNgCount++;
+                            $ngCount++;
+                        }
+                    }
+
+                    $processedSamples[] = [
+                        'sample_index' => $sampleIndex,
+                        'status' => $isOk ? 'ok' : ($isNg ? 'ng' : null),
+                        'single_value' => $sample['single_value'] ?? null,
+                        'before_after_value' => $sample['before_after_value'] ?? null,
+                        'qualitative_value' => $sample['qualitative_value'] ?? null,
+                    ];
+                }
+
+                // For JOINT evaluation, count based on item status
+                // ✅ FIX: But also consider actual sample status if available for better accuracy
+                if ($evaluationType === 'JOINT' && $nature === 'QUANTITATIVE') {
+                    // Check if we have actual sample statuses - if all samples have status, use them
+                    $hasSampleStatuses = false;
+                    $jointOkCount = 0;
+                    $jointNgCount = 0;
+                    foreach ($processedSamples as $processedSample) {
+                        if ($processedSample['status'] === 'ok') {
+                            $jointOkCount++;
+                            $hasSampleStatuses = true;
+                        } elseif ($processedSample['status'] === 'ng') {
+                            $jointNgCount++;
+                            $hasSampleStatuses = true;
+                        }
+                    }
+                    
+                    if ($hasSampleStatuses && ($jointOkCount > 0 || $jointNgCount > 0)) {
+                        // Use actual sample statuses if available
+                        $pointOkCount = $jointOkCount;
+                        $pointNgCount = $jointNgCount;
+                        $okCount += $jointOkCount;
+                        $ngCount += $jointNgCount;
+                    } else {
+                        // Fallback to item status
+                        if ($item['status'] === true) {
+                            $pointOkCount = $sampleAmount;
+                            $okCount += $sampleAmount;
+                        } else {
+                            $pointNgCount = $sampleAmount;
+                            $ngCount += $sampleAmount;
+                        }
+                    }
+                }
+
+                // Calculate statistical values (only for PER_SAMPLE QUANTITATIVE with data > 1)
+                // ✅ FIX: For SKIP_CHECK, ok and ng should be 0 (no checking performed, just data collection)
+                $summary = [
+                    'sample_amount' => $sampleAmount,
+                    'ok' => $evaluationType === 'SKIP_CHECK' ? 0 : $pointOkCount,
+                    'ng' => $evaluationType === 'SKIP_CHECK' ? 0 : $pointNgCount,
+                    'ng_ratio' => ($evaluationType === 'SKIP_CHECK' || $sampleAmount === 0) ? 0 : (($pointNgCount / $sampleAmount) * 100),
+                    'maximum_value' => null,
+                    'minimum_value' => null,
+                    'sigma' => null,
+                    'sigma_3' => null,
+                    'sigma_6' => null,
+                    'cp' => null,
+                    'cpk' => null,
+                ];
+
+                // ✅ FIX: Calculate sigma, CP, CPK only for PER_SAMPLE QUANTITATIVE with more than 1 sample
+                // Also ensure values array is populated
+                if ($evaluationType === 'PER_SAMPLE' && $nature === 'QUANTITATIVE' && count($values) > 1) {
+                    $summary['maximum_value'] = max($values);
+                    $summary['minimum_value'] = min($values);
+                    
+                    $sigma = StatisticalHelper::calculateStandardDeviation($values);
+                    $summary['sigma'] = $sigma;
+                    $summary['sigma_3'] = StatisticalHelper::calculateNSigma($sigma, 3);
+                    $summary['sigma_6'] = StatisticalHelper::calculateNSigma($sigma, 6);
+
+                    // Calculate CP only for BETWEEN rule
+                    $ruleEvaluation = $point['rule_evaluation_setting'] ?? null;
+                    if ($ruleEvaluation && isset($ruleEvaluation['rule']) && $ruleEvaluation['rule'] === 'BETWEEN') {
+                        $cp = StatisticalHelper::calculateCP(
+                            $summary['maximum_value'],
+                            $summary['minimum_value'],
+                            $sigma
+                        );
+                        $summary['cp'] = $cp;
+                    }
+
+                    // Calculate CPK for all evaluation types (MIN, MAX, BETWEEN)
+                    if ($ruleEvaluation && isset($ruleEvaluation['rule'])) {
+                        $mean = array_sum($values) / count($values);
+                        $cpk = StatisticalHelper::calculateCPK(
+                            $ruleEvaluation['rule'],
+                            $mean,
+                            $sigma,
+                            $summary['minimum_value'],
+                            $summary['maximum_value'],
+                            $ruleEvaluation['value'] ?? null,
+                            $ruleEvaluation['tolerance_minus'] ?? null,
+                            $ruleEvaluation['tolerance_plus'] ?? null
+                        );
+                        $summary['cpk'] = $cpk;
+                    }
+                }
+
+                $measurementPointResults[] = [
+                    'name' => $point['setup']['name'] ?? '',
+                    'name_id' => $itemNameId,
+                    'unit' => $point['rule_evaluation_setting']['unit'] ?? null,
+                    'summary' => $summary,
+                    'samples' => $processedSamples,
+                ];
+            }
+
+            // Calculate overall summary
+            // ✅ FIX: array_column doesn't support nested keys, need to extract manually
+            // For totalSamples, count all samples (including SKIP_CHECK - they still collect data)
+            // But for OK/NG ratio calculation, only count samples that were actually evaluated
+            $totalSamples = 0;
+            $totalEvaluatedSamples = 0; // Samples that were actually evaluated (not SKIP_CHECK)
+            
+            foreach ($measurementPointResults as $pointResult) {
+                $sampleAmount = $pointResult['summary']['sample_amount'] ?? 0;
+                $totalSamples += $sampleAmount;
+                
+                // Check if this measurement point is SKIP_CHECK
+                $itemNameId = $pointResult['name_id'] ?? null;
+                $isSkipCheck = false;
+                if ($itemNameId && isset($measurementPointMap[$itemNameId])) {
+                    $point = $measurementPointMap[$itemNameId];
+                    $evaluationType = $point['evaluation_type'] ?? null;
+                    $isSkipCheck = ($evaluationType === 'SKIP_CHECK');
+                }
+                
+                // Only count samples that were evaluated (not SKIP_CHECK)
+                if (!$isSkipCheck) {
+                    $totalEvaluatedSamples += $sampleAmount;
+                }
+            }
+            
+            $summary = [
+                'sample' => $totalSamples, // Total samples collected (including SKIP_CHECK)
+                'ok' => $okCount,
+                'ng' => $ngCount,
+                'ng_ratio' => $totalEvaluatedSamples > 0 ? ($ngCount / $totalEvaluatedSamples) * 100 : 0,
+            ];
+
+            // Determine status
+            $status = 'TODO';
+            if ($measurement->status === 'COMPLETED') {
+                $status = $okCount > 0 && $ngCount === 0 ? 'OK' : ($ngCount > 0 ? 'NEED_TO_MEASURE' : 'TODO');
+            } elseif ($measurement->status === 'IN_PROGRESS') {
+                $status = 'ONGOING';
+            } elseif ($measurement->status === 'PENDING') {
+                $status = 'TODO';
+            }
+
+            // Calculate progress
+            $totalPoints = count($measurementPoints);
+            $completedPoints = count(array_filter($measurementResults, function($item) {
+                return isset($item['status']);
+            }));
+            $progress = $totalPoints > 0 ? ($completedPoints / $totalPoints) * 100 : 0;
+
+            return $this->successResponse([
+                'product_measurement_id' => $measurement->measurement_id,
+                'status' => $status,
+                'batch_number' => $measurement->batch_number,
+                'progress' => round($progress, 2),
+                'due_date' => $measurement->due_date,
+                'summary' => $summary,
+                'measurement_point_results' => $measurementPointResults,
+                'finished_at' => $measurement->status === 'COMPLETED' ? $measurement->measured_at : null,
+                'created_at' => $measurement->created_at,
+                'updated_at' => $measurement->updated_at,
+            ], 'Measurement result retrieved successfully');
+
+        } catch (\Exception $e) {
+            return $this->errorResponse(
+                'Error fetching measurement result: ' . $e->getMessage(),
+                'MEASUREMENT_RESULT_FETCH_ERROR',
                 500
             );
         }

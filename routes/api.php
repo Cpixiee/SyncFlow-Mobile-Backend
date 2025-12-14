@@ -36,9 +36,13 @@ Route::prefix('v1')->group(function () {
             // Autocomplete endpoint - available for all authenticated users
             Route::get('/{productId}/measurement-items/suggest', [ProductController::class, 'suggestMeasurementItems']);
 
+            // Master products endpoint - available for all authenticated users
+            Route::get('/master-products', [ProductController::class, 'getMasterProducts']);
+
             // Admin and SuperAdmin only routes
             Route::middleware('role:admin,superadmin')->group(function () {
                 Route::post('/', [ProductController::class, 'store']);
+                Route::post('/from-existing', [ProductController::class, 'createFromExisting']);
                 Route::get('/', [ProductController::class, 'index']);
                 Route::get('/is-product-exists', [ProductController::class, 'checkProductExists']);
                 Route::get('/categories', [ProductController::class, 'getProductCategories']);
@@ -55,6 +59,7 @@ Route::prefix('v1')->group(function () {
             Route::get('/progress-category', [ProductMeasurementController::class, 'getProgressCategory']);
             Route::get('/progress-all', [ProductMeasurementController::class, 'getProgressAll']);
             Route::get('/available-products', [ProductMeasurementController::class, 'getAvailableProducts']);
+            Route::get('/by-product', [ProductMeasurementController::class, 'getByProduct']);
             Route::post('/', [ProductMeasurementController::class, 'store']);
             Route::post('/bulk', [ProductMeasurementController::class, 'bulkStore']);
             Route::post('/{productMeasurementId}/set-batch-number', [ProductMeasurementController::class, 'setBatchNumber']);
@@ -62,6 +67,7 @@ Route::prefix('v1')->group(function () {
             Route::post('/{productMeasurementId}/samples/check', [ProductMeasurementController::class, 'checkSamples']);
             Route::post('/{productMeasurementId}/save-progress', [ProductMeasurementController::class, 'saveProgress']);
             Route::post('/{productMeasurementId}/create-sample-product', [ProductMeasurementController::class, 'createSampleProduct']);
+            Route::get('/{productMeasurementId}/result', [ProductMeasurementController::class, 'getResult']);
             Route::get('/{productMeasurementId}', [ProductMeasurementController::class, 'show']);
             Route::put('/{productMeasurementId}', [ProductMeasurementController::class, 'update']);
             Route::delete('/{productMeasurementId}', [ProductMeasurementController::class, 'destroy']);

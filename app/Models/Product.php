@@ -16,6 +16,7 @@ class Product extends Model
         'quarter_id',
         'product_category_id',
         'product_name',
+        'product_spec_name',
         'ref_spec_number',
         'nom_size_vo',
         'article_code',
@@ -65,7 +66,7 @@ class Product extends Model
     }
 
     /**
-     * Boot method untuk auto-generate product_id
+     * Boot method untuk auto-generate product_id and product_spec_name
      */
     protected static function boot()
     {
@@ -74,6 +75,25 @@ class Product extends Model
         static::creating(function ($product) {
             if (empty($product->product_id)) {
                 $product->product_id = self::generateProductId();
+            }
+            // Auto-generate product_spec_name from product_name + size + color
+            if (empty($product->product_spec_name)) {
+                $product->product_spec_name = self::generateProductSpecName(
+                    $product->product_name ?? '',
+                    $product->size ?? null,
+                    $product->color ?? null
+                );
+            }
+        });
+
+        static::updating(function ($product) {
+            // Regenerate product_spec_name if product_name, size, or color changed
+            if ($product->isDirty(['product_name', 'size', 'color'])) {
+                $product->product_spec_name = self::generateProductSpecName(
+                    $product->product_name ?? '',
+                    $product->size ?? null,
+                    $product->color ?? null
+                );
             }
         });
     }
@@ -88,6 +108,23 @@ class Product extends Model
         } while (self::where('product_id', $productId)->exists());
 
         return $productId;
+    }
+
+    /**
+     * Generate product spec name from product_name, size, and color
+     * Format: "{product_name} {size} {color}" (trimmed, with single spaces)
+     */
+    public static function generateProductSpecName(?string $productName, ?string $size, ?string $color): string
+    {
+        $parts = array_filter([
+            $productName,
+            $size,
+            $color
+        ], function($value) {
+            return !empty($value) && trim($value) !== '';
+        });
+
+        return trim(implode(' ', $parts));
     }
 
     /**
