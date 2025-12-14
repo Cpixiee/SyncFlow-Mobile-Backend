@@ -1116,6 +1116,35 @@ class ProductMeasurementController extends Controller
      */
     private function evaluatePerSampleItem(array $result, array $measurementPoint, array $processedSamples): array
     {
+        $setup = $measurementPoint['setup'] ?? [];
+        $nature = $setup['nature'] ?? null;
+        
+        // ✅ FIX: Handle QUALITATIVE nature differently - use qualitative_value directly
+        if ($nature === 'QUALITATIVE') {
+            $allSamplesOK = true;
+            
+            foreach ($result['samples'] as &$sample) {
+                // For QUALITATIVE, qualitative_value (boolean) directly determines status
+                // true = OK, false = NG
+                $qualitativeValue = $sample['qualitative_value'] ?? null;
+                
+                if ($qualitativeValue === true) {
+                    $sample['status'] = true; // OK
+                } elseif ($qualitativeValue === false) {
+                    $sample['status'] = false; // NG
+                    $allSamplesOK = false;
+                } else {
+                    // If qualitative_value is null/not provided, treat as NG
+                    $sample['status'] = false;
+                    $allSamplesOK = false;
+                }
+            }
+            
+            $result['status'] = $allSamplesOK;
+            return $result;
+        }
+        
+        // For QUANTITATIVE, use existing logic with rule evaluation
         $ruleEvaluation = $measurementPoint['rule_evaluation_setting'];
         $evaluationSetting = $measurementPoint['evaluation_setting']['per_sample_setting'];
         
@@ -2307,6 +2336,9 @@ class ProductMeasurementController extends Controller
             });
 
             return $this->successResponse([
+                'product_id' => $product->product_id,
+                'product_name' => $product->product_name,
+                'product_spec_name' => $product->product_spec_name,
                 'docs' => $docs,
             ], 'Product measurements retrieved successfully');
 
@@ -2581,6 +2613,9 @@ class ProductMeasurementController extends Controller
 
             return $this->successResponse([
                 'product_measurement_id' => $measurement->measurement_id,
+                'product_id' => $product->product_id,
+                'product_name' => $product->product_name,
+                'product_spec_name' => $product->product_spec_name,
                 'status' => $status,
                 'batch_number' => $measurement->batch_number,
                 'progress' => round($progress, 2),
