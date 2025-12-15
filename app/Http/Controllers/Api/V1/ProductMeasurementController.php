@@ -3258,6 +3258,7 @@ class ProductMeasurementController extends Controller
     
     /**
      * Check if samples data has changed
+     * ✅ FIX: Compare by sample_index instead of array index for more accurate comparison
      */
     private function samplesDataChanged(array $oldSamples, array $newSamples): bool
     {
@@ -3265,37 +3266,84 @@ class ProductMeasurementController extends Controller
             return true;
         }
         
-        // Compare sample values
-        foreach ($newSamples as $index => $newSample) {
-            if (!isset($oldSamples[$index])) {
-                return true;
+        // Build maps by sample_index for accurate comparison
+        $oldSamplesMap = [];
+        foreach ($oldSamples as $oldSample) {
+            $sampleIndex = $oldSample['sample_index'] ?? null;
+            if ($sampleIndex !== null) {
+                $oldSamplesMap[$sampleIndex] = $oldSample;
+            }
+        }
+        
+        $newSamplesMap = [];
+        foreach ($newSamples as $newSample) {
+            $sampleIndex = $newSample['sample_index'] ?? null;
+            if ($sampleIndex !== null) {
+                $newSamplesMap[$sampleIndex] = $newSample;
+            }
+        }
+        
+        // Check if all sample_indexes match
+        if (count($oldSamplesMap) !== count($newSamplesMap)) {
+            return true;
+        }
+        
+        // Compare samples by sample_index
+        foreach ($newSamplesMap as $sampleIndex => $newSample) {
+            if (!isset($oldSamplesMap[$sampleIndex])) {
+                return true; // Sample index not found in old samples
             }
             
-            $oldSample = $oldSamples[$index];
+            $oldSample = $oldSamplesMap[$sampleIndex];
             
-            // Check single_value
+            // Check single_value (use strict comparison for numeric values)
             if (isset($newSample['single_value']) && isset($oldSample['single_value'])) {
-                if ($newSample['single_value'] != $oldSample['single_value']) {
-                    return true;
+                // Use abs difference < epsilon for floating point comparison, or exact match for integers
+                $newVal = $newSample['single_value'];
+                $oldVal = $oldSample['single_value'];
+                if (is_float($newVal) || is_float($oldVal)) {
+                    if (abs($newVal - $oldVal) > 0.0001) {
+                        return true;
+                    }
+                } else {
+                    if ($newVal != $oldVal) {
+                        return true;
+                    }
                 }
+            } elseif (isset($newSample['single_value']) || isset($oldSample['single_value'])) {
+                // One has single_value, the other doesn't
+                return true;
             }
             
             // Check before_after_value
             if (isset($newSample['before_after_value']) && isset($oldSample['before_after_value'])) {
-                if (json_encode($newSample['before_after_value']) != json_encode($oldSample['before_after_value'])) {
+                $newBefore = $newSample['before_after_value']['before'] ?? null;
+                $newAfter = $newSample['before_after_value']['after'] ?? null;
+                $oldBefore = $oldSample['before_after_value']['before'] ?? null;
+                $oldAfter = $oldSample['before_after_value']['after'] ?? null;
+                
+                // Compare with floating point tolerance
+                if (abs(($newBefore ?? 0) - ($oldBefore ?? 0)) > 0.0001 || 
+                    abs(($newAfter ?? 0) - ($oldAfter ?? 0)) > 0.0001) {
                     return true;
                 }
+            } elseif (isset($newSample['before_after_value']) || isset($oldSample['before_after_value'])) {
+                // One has before_after_value, the other doesn't
+                return true;
             }
             
-            // Check qualitative_value
+            // Check qualitative_value (strict comparison for boolean)
             if (isset($newSample['qualitative_value']) && isset($oldSample['qualitative_value'])) {
-                if ($newSample['qualitative_value'] != $oldSample['qualitative_value']) {
+                if ($newSample['qualitative_value'] !== $oldSample['qualitative_value']) {
                     return true;
                 }
+            } elseif (isset($newSample['qualitative_value']) || isset($oldSample['qualitative_value'])) {
+                // One has qualitative_value, the other doesn't
+                return true;
             }
         }
         
-        return false;
+        return false; // No changes detected
     }
     
     /**
