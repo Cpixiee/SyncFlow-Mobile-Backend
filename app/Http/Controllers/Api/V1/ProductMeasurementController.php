@@ -1942,24 +1942,54 @@ class ProductMeasurementController extends Controller
             // Build warnings for items that need re-check
             $needReCheckWarnings = [];
             foreach ($needReCheckItems as $itemNameId) {
+                // Get measurement point to determine type
+                $measurementPoint = null;
+                foreach ($measurementPoints as $mp) {
+                    if (isset($mp['setup']['name_id']) && $mp['setup']['name_id'] === $itemNameId) {
+                        $measurementPoint = $mp;
+                        break;
+                    }
+                }
+                
+                $setup = $measurementPoint['setup'] ?? [];
+                $type = $setup['type'] ?? null;
+                $nature = $setup['nature'] ?? null;
+                
                 // Get last check values and current values for comparison
                 $lastCheckValues = [];
                 $currentValues = [];
                 
+                // Extract raw values from last check data based on type
                 if (isset($lastCheckData[$itemNameId]['samples'])) {
                     foreach ($lastCheckData[$itemNameId]['samples'] as $sample) {
-                        if (isset($sample['single_value'])) {
+                        if ($type === 'SINGLE' && isset($sample['single_value'])) {
                             $lastCheckValues[] = $sample['single_value'];
+                        } elseif ($type === 'BEFORE_AFTER' && isset($sample['before_after_value'])) {
+                            $beforeAfter = $sample['before_after_value'];
+                            $lastCheckValues[] = [
+                                'before' => $beforeAfter['before'] ?? null,
+                                'after' => $beforeAfter['after'] ?? null,
+                            ];
+                        } elseif ($nature === 'QUALITATIVE' && isset($sample['qualitative_value'])) {
+                            $lastCheckValues[] = $sample['qualitative_value'];
                         }
                     }
                 }
                 
-                // Find current values in newResults
+                // Extract raw values from current results based on type
                 foreach ($newResults as $result) {
                     if ($result['measurement_item_name_id'] === $itemNameId && isset($result['samples'])) {
                         foreach ($result['samples'] as $sample) {
-                            if (isset($sample['single_value'])) {
+                            if ($type === 'SINGLE' && isset($sample['single_value'])) {
                                 $currentValues[] = $sample['single_value'];
+                            } elseif ($type === 'BEFORE_AFTER' && isset($sample['before_after_value'])) {
+                                $beforeAfter = $sample['before_after_value'];
+                                $currentValues[] = [
+                                    'before' => $beforeAfter['before'] ?? null,
+                                    'after' => $beforeAfter['after'] ?? null,
+                                ];
+                            } elseif ($nature === 'QUALITATIVE' && isset($sample['qualitative_value'])) {
+                                $currentValues[] = $sample['qualitative_value'];
                             }
                         }
                         break;
