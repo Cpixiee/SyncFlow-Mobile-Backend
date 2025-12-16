@@ -1515,55 +1515,82 @@ class ProductMeasurementController extends Controller
 
         foreach ($measurementResults as $item) {
             $itemStatus = $item['status'] ?? false;
-            $itemName = $item['measurement_item_name_id'];
-            
+            $itemName = $item['measurement_item_name_id'] ?? null;
+
             if ($itemStatus) {
                 $passedItems++;
             } else {
                 $failedItems++;
             }
 
-            // Count sample results for PER_SAMPLE evaluation
+            // Count sample results
             $sampleResults = [];
             if (isset($item['samples'])) {
                 foreach ($item['samples'] as $sample) {
                     $sampleResults[] = [
-                        'sample_index' => $sample['sample_index'],
+                        'sample_index' => $sample['sample_index'] ?? null,
                         'status' => $sample['status'] ?? null,
                         'result' => isset($sample['status']) ? ($sample['status'] ? 'OK' : 'NG') : 'N/A'
                     ];
                 }
             }
 
-            // Enhanced evaluation details for different types
+            // Detect evaluation type & final value
+            $isJoint = false;
+            $finalValue = $item['final_value'] ?? null;
+            $jointSteps = [];
+
+            if (isset($item['joint_results']) && !empty($item['joint_results'])) {
+                // Legacy model-based structure
+                $isJoint = true;
+                $jointSteps = $item['joint_results'];
+                if ($finalValue === null) {
+                    foreach ($jointSteps as $step) {
+                        if (!empty($step['is_final_value']) && array_key_exists('value', $step)) {
+                            $finalValue = $step['value'];
+                            break;
+                        }
+                    }
+                }
+            } elseif (isset($item['joint_setting_formula_values']) && !empty($item['joint_setting_formula_values'])) {
+                // Controller-based structure
+                $isJoint = true;
+                $jointSteps = $item['joint_setting_formula_values'];
+                foreach ($jointSteps as $step) {
+                    if (!empty($step['is_final_value']) && array_key_exists('value', $step)) {
+                        $finalValue = $step['value'];
+                        break;
+                    }
+                }
+            }
+
             $evaluationDetails = [
                 'measurement_item' => $itemName,
                 'status' => $itemStatus,
                 'result' => $itemStatus ? 'OK' : 'NG',
-                'evaluation_type' => isset($item['joint_results']) ? 'JOINT' : 'PER_SAMPLE',
-                'final_value' => $item['final_value'] ?? null,
-                'samples_summary' => $sampleResults
+                'evaluation_type' => $isJoint ? 'JOINT' : 'PER_SAMPLE',
+                'final_value' => $finalValue,
+                'samples_summary' => $sampleResults,
             ];
 
-            // Add specific details for JOINT evaluation
-            if (isset($item['joint_results']) && !empty($item['joint_results'])) {
+            if ($isJoint) {
                 $evaluationDetails['joint_evaluation'] = [
-                    'final_value' => $item['final_value'],
+                    'final_value' => $finalValue,
                     'rule_evaluation' => [
                         'result' => $itemStatus ? 'OK' : 'NG',
-                        'final_value' => $item['final_value'],
+                        'final_value' => $finalValue,
                         'evaluation_method' => 'Final value checked against rule'
                     ],
-                    'formula_steps' => $item['joint_results']
+                    'formula_steps' => $jointSteps
                 ];
-                
-                // Update sample summary for JOINT - show final result for all samples
-                $evaluationDetails['samples_summary'] = array_map(function($sample) use ($itemStatus, $item) {
+
+                // Perlihatkan hasil final untuk semua sample
+                $evaluationDetails['samples_summary'] = array_map(function ($sample) use ($itemStatus, $finalValue) {
                     return [
-                        'sample_index' => $sample['sample_index'],
+                        'sample_index' => $sample['sample_index'] ?? null,
                         'status' => $itemStatus,
                         'result' => $itemStatus ? 'OK' : 'NG',
-                        'note' => 'Final value: ' . ($item['final_value'] ?? 'N/A') . ' → ' . ($itemStatus ? 'OK' : 'NG')
+                        'note' => 'Final value: ' . ($finalValue ?? 'N/A') . ' → ' . ($itemStatus ? 'OK' : 'NG')
                     ];
                 }, $sampleResults);
             }
@@ -2074,6 +2101,15 @@ class ProductMeasurementController extends Controller
     public function submitMeasurement(Request $request, string $productMeasurementId)
     {
         try {
+            // ✅ Sama seperti saveProgress: pastikan body tidak kosong / JSON valid
+            if (empty($request->all())) {
+                return $this->errorResponse(
+                    'Request body kosong atau tidak valid. Pastikan Content-Type: application/json dan payload JSON valid.',
+                    'INVALID_REQUEST_BODY',
+                    400
+                );
+            }
+
             // Find the measurement
             $measurement = ProductMeasurement::where('measurement_id', $productMeasurementId)->first();
 
@@ -2081,28 +2117,24 @@ class ProductMeasurementController extends Controller
                 return $this->notFoundResponse('Product measurement tidak ditemukan');
             }
 
-            // Enhanced validation based on your specification
+            // Validasi struktur dasar (sedikit lebih ketat dari saveProgress karena submit final)
             $validator = Validator::make($request->all(), [
                 'measurement_results' => 'required|array|min:1',
                 'measurement_results.*.measurement_item_name_id' => 'required|string',
                 'measurement_results.*.status' => 'nullable|boolean',
                 'measurement_results.*.variable_values' => 'nullable|array',
-                'measurement_results.*.variable_values.*.name' => 'required_with:measurement_results.*.variable_values|string',
-                'measurement_results.*.variable_values.*.value' => 'required_with:measurement_results.*.variable_values|numeric',
+                'measurement_results.*.variable_values.*.name_id' => 'required_with:measurement_results.*.variable_values|string',
+                'measurement_results.*.variable_values.*.value' => 'required_with:measurement_results.*.variable_values',
                 'measurement_results.*.samples' => 'required|array|min:1',
                 'measurement_results.*.samples.*.sample_index' => 'required|integer|min:1',
-                'measurement_results.*.samples.*.status' => 'nullable|string',
+                'measurement_results.*.samples.*.status' => 'nullable|boolean',
                 'measurement_results.*.samples.*.single_value' => 'nullable|numeric',
                 'measurement_results.*.samples.*.before_after_value' => 'nullable|array',
                 'measurement_results.*.samples.*.before_after_value.before' => 'required_with:measurement_results.*.samples.*.before_after_value|numeric',
                 'measurement_results.*.samples.*.before_after_value.after' => 'required_with:measurement_results.*.samples.*.before_after_value|numeric',
-                'measurement_results.*.samples.*.qualitative_value' => 'nullable|string',
+                'measurement_results.*.samples.*.qualitative_value' => 'nullable|boolean',
                 'measurement_results.*.samples.*.pre_processing_formula_values' => 'nullable|array',
                 'measurement_results.*.joint_setting_formula_values' => 'nullable|array',
-                'measurement_results.*.joint_setting_formula_values.*.name' => 'required_with:measurement_results.*.joint_setting_formula_values|string',
-                'measurement_results.*.joint_setting_formula_values.*.value' => 'nullable|numeric',
-                'measurement_results.*.joint_setting_formula_values.*.formula' => 'nullable|string',
-                'measurement_results.*.joint_setting_formula_values.*.is_final_value' => 'required_with:measurement_results.*.joint_setting_formula_values|boolean',
             ]);
 
             if ($validator->fails()) {
@@ -2112,24 +2144,435 @@ class ProductMeasurementController extends Controller
                 );
             }
 
-            // Process measurement results
-            $result = $measurement->processMeasurementResults($request->all());
+            // ✅ Sama seperti saveProgress: pastikan semua measurement_item_name_id valid terhadap product config
+            $product = $measurement->product;
+            if (!$product) {
+                return $this->errorResponse(
+                    'Product tidak ditemukan untuk measurement ini',
+                    'PRODUCT_NOT_FOUND',
+                    404
+                );
+            }
 
-            // Update measurement status
+            $measurementPoints = $product->measurement_points ?? [];
+            $validMeasurementItemNameIds = [];
+            foreach ($measurementPoints as $point) {
+                if (isset($point['setup']['name_id'])) {
+                    $validMeasurementItemNameIds[] = $point['setup']['name_id'];
+                }
+            }
+
+            $invalidMeasurementItems = [];
+            foreach ($request->measurement_results as $index => $result) {
+                $itemNameId = $result['measurement_item_name_id'] ?? null;
+                if ($itemNameId && !in_array($itemNameId, $validMeasurementItemNameIds)) {
+                    $invalidMeasurementItems[] = [
+                        'index' => $index,
+                        'measurement_item_name_id' => $itemNameId,
+                        'message' => "Measurement item '{$itemNameId}' tidak ditemukan di product ini"
+                    ];
+                }
+            }
+
+            if (!empty($invalidMeasurementItems)) {
+                return $this->errorResponse(
+                    'Beberapa measurement_item_name_id tidak valid',
+                    'INVALID_MEASUREMENT_ITEM',
+                    400,
+                    [
+                        'invalid_items' => $invalidMeasurementItems,
+                        'valid_measurement_items' => $validMeasurementItemNameIds
+                    ]
+                );
+            }
+
+            // ✅ Ambil existing results & last_check_data untuk mekanisme re-check dan dependency (sama seperti saveProgress)
+            $existingResults = $measurement->measurement_results ?? [];
+            $lastCheckData = $measurement->last_check_data ?? [];
+            $newResults = $request->measurement_results;
+
+            // Map existingResults berdasar measurement_item_name_id
+            $existingResultsMap = [];
+            foreach ($existingResults as $key => $result) {
+                $existingResultsMap[$result['measurement_item_name_id']] = [
+                    'key' => $key,
+                    'data' => $result
+                ];
+            }
+
+            $changedItems = [];
+            $needReCheckItems = [];
+
+            // Build initial working context dari existingResults (untuk formulas & cross-reference)
+            $workingContext = [];
+            foreach ($existingResults as $result) {
+                $itemNameId = $result['measurement_item_name_id'] ?? null;
+                if ($itemNameId) {
+                    $workingContext[$itemNameId] = [
+                        'samples' => $result['samples'] ?? [],
+                        'variable_values' => $result['variable_values'] ?? [],
+                        'status' => $result['status'] ?? null,
+                        'joint_setting_formula_values' => $result['joint_setting_formula_values'] ?? null,
+                    ];
+                }
+            }
+
+            // ✅ Merge new results dengan mekanisme yang sama seperti saveProgress
+            foreach ($newResults as $newResult) {
+                $itemNameId = $newResult['measurement_item_name_id'];
+                $newSamples = $newResult['samples'] ?? [];
+
+                // Bandingkan dengan data terakhir yang pernah di-check (/samples/check)
+                $lastCheckSamples = isset($lastCheckData[$itemNameId])
+                    ? ($lastCheckData[$itemNameId]['samples'] ?? [])
+                    : [];
+
+                if (empty($lastCheckSamples) && isset($existingResultsMap[$itemNameId])) {
+                    $lastCheckSamples = $existingResultsMap[$itemNameId]['data']['samples'] ?? [];
+                }
+
+                $samplesChanged = false;
+                if (!empty($lastCheckSamples)) {
+                    $samplesChanged = $this->samplesDataChanged($lastCheckSamples, $newSamples);
+                }
+
+                if ($samplesChanged) {
+                    // Raw data berubah, cek apakah sudah di-recheck via /samples/check
+                    $hasRecentCheck = false;
+                    if (isset($lastCheckData[$itemNameId]['checked_at'])) {
+                        $lastCheckedAt = \Carbon\Carbon::parse($lastCheckData[$itemNameId]['checked_at']);
+                        $timeDiff = $lastCheckedAt->diffInMinutes(now());
+
+                        if ($timeDiff < 5) {
+                            $lastCheckSamplesRecent = $lastCheckData[$itemNameId]['samples'] ?? [];
+                            if (!$this->samplesDataChanged($lastCheckSamplesRecent, $newSamples)) {
+                                $hasRecentCheck = true;
+                            }
+                        }
+                    }
+
+                    if (!$hasRecentCheck) {
+                        $needReCheckItems[] = $itemNameId;
+                    } else {
+                        $changedItems[] = $itemNameId;
+                    }
+                }
+
+                // Cari measurement point
+                $measurementPoint = null;
+                foreach ($measurementPoints as $mp) {
+                    if (isset($mp['setup']['name_id']) && $mp['setup']['name_id'] === $itemNameId) {
+                        $measurementPoint = $mp;
+                        break;
+                    }
+                }
+
+                // Jika ada pre_processing_formulas dan belum terisi di samples, proses lagi
+                if ($measurementPoint && isset($measurementPoint['pre_processing_formulas']) && !empty($measurementPoint['pre_processing_formulas'])) {
+                    $needsPreprocessing = false;
+                    foreach ($newSamples as $sample) {
+                        if (!isset($sample['pre_processing_formula_values']) || empty($sample['pre_processing_formula_values'])) {
+                            $needsPreprocessing = true;
+                            break;
+                        }
+                    }
+
+                    if ($needsPreprocessing) {
+                        try {
+                            $processedSamples = [];
+                            $variableValues = $newResult['variable_values'] ?? [];
+
+                            $preprocessingCompleteVariables = $this->buildCompleteVariableValues($measurementPoint, $variableValues, $workingContext);
+
+                            foreach ($newSamples as $sample) {
+                                $rawValues = [];
+                                $setup = $measurementPoint['setup'];
+
+                                if (($setup['type'] ?? null) === 'SINGLE' && isset($sample['single_value'])) {
+                                    $rawValues['single_value'] = $sample['single_value'];
+                                } elseif (($setup['type'] ?? null) === 'BEFORE_AFTER' && isset($sample['before_after_value'])) {
+                                    $rawValues['before_after_value'] = $sample['before_after_value'];
+                                }
+
+                                $processedFormulas = $this->processPreProcessingFormulasForItem(
+                                    $measurementPoint['pre_processing_formulas'],
+                                    $rawValues,
+                                    $preprocessingCompleteVariables,
+                                    $workingContext
+                                );
+
+                                $sample['pre_processing_formula_values'] = array_map(function ($formula, $result) {
+                                    return [
+                                        'name' => $formula['name'],
+                                        'formula' => $formula['formula'],
+                                        'value' => $result,
+                                        'is_show' => $formula['is_show'] ?? false
+                                    ];
+                                }, $measurementPoint['pre_processing_formulas'], $processedFormulas);
+
+                                $processedSamples[] = $sample;
+                            }
+
+                            $newSamples = $processedSamples;
+                        } catch (\Exception $e) {
+                            return $this->errorResponse(
+                                "Error processing preprocessing formulas untuk measurement item '{$itemNameId}': " . $e->getMessage(),
+                                'PREPROCESSING_FORMULA_ERROR',
+                                400
+                            );
+                        }
+                    }
+                }
+
+                // Build variable_values lengkap (FIXED, MANUAL, FORMULA)
+                $finalVariableValues = $newResult['variable_values'] ?? [];
+                if ($measurementPoint) {
+                    try {
+                        if (isset($preprocessingCompleteVariables)) {
+                            $finalVariableValues = $preprocessingCompleteVariables;
+                        } else {
+                            $finalVariableValues = $this->buildCompleteVariableValues($measurementPoint, $finalVariableValues, $workingContext);
+                        }
+                    } catch (\Exception $e) {
+                        // Abaikan, pakai nilai yang ada
+                    }
+                }
+
+                // Recompute joint_setting_formula_values jika kosong tapi dibutuhkan
+                $jointFormulaValues = $newResult['joint_setting_formula_values'] ?? null;
+                if (!$jointFormulaValues && $measurementPoint && isset($measurementPoint['evaluation_setting']['joint_setting'])) {
+                    try {
+                        $measurementItemData = [
+                            'measurement_item_name_id' => $itemNameId,
+                            'variable_values' => $finalVariableValues,
+                            'samples' => $newSamples,
+                        ];
+
+                        $evaluated = $this->evaluateSampleItem($newSamples, $measurementPoint, $measurementItemData, $workingContext);
+
+                        if (isset($evaluated['joint_setting_formula_values'])) {
+                            $jointFormulaValues = $evaluated['joint_setting_formula_values'];
+                        }
+                    } catch (\Exception $e) {
+                        // Abaikan, nanti bisa direcompute saat show / getResult
+                    }
+                }
+
+                // Update / tambah ke existingResults
+                if (isset($existingResultsMap[$itemNameId])) {
+                    $key = $existingResultsMap[$itemNameId]['key'];
+                    $oldData = $existingResultsMap[$itemNameId]['data'];
+
+                    $existingResults[$key] = [
+                        'measurement_item_name_id' => $itemNameId,
+                        'status' => $newResult['status'] ?? null,
+                        'variable_values' => $finalVariableValues,
+                        'samples' => $newSamples,
+                        'joint_setting_formula_values' => $jointFormulaValues,
+                        'created_at' => $oldData['created_at'] ?? now()->toISOString(),
+                        'updated_at' => now()->toISOString(),
+                    ];
+                } else {
+                    if (isset($lastCheckData[$itemNameId])) {
+                        $changedItems[] = $itemNameId;
+                    }
+
+                    $existingResults[] = [
+                        'measurement_item_name_id' => $itemNameId,
+                        'status' => $newResult['status'] ?? null,
+                        'variable_values' => $finalVariableValues,
+                        'samples' => $newSamples,
+                        'joint_setting_formula_values' => $jointFormulaValues,
+                        'created_at' => now()->toISOString(),
+                        'updated_at' => now()->toISOString(),
+                    ];
+                }
+
+                // Update working context untuk item ini
+                $workingContext[$itemNameId] = [
+                    'samples' => $newSamples,
+                    'variable_values' => $finalVariableValues,
+                    'status' => $newResult['status'] ?? null,
+                    'joint_setting_formula_values' => $jointFormulaValues,
+                ];
+            }
+
+            // ✅ Level 1: warning kalau ada raw data berubah tapi belum re-check
+            $needReCheckWarnings = [];
+            foreach ($needReCheckItems as $itemNameId) {
+                $measurementPoint = null;
+                foreach ($measurementPoints as $mp) {
+                    if (isset($mp['setup']['name_id']) && $mp['setup']['name_id'] === $itemNameId) {
+                        $measurementPoint = $mp;
+                        break;
+                    }
+                }
+
+                $setup = $measurementPoint['setup'] ?? [];
+                $type = $setup['type'] ?? null;
+                $nature = $setup['nature'] ?? null;
+
+                $lastCheckValues = [];
+                $currentValues = [];
+
+                // nilai dari last_check_data
+                if (isset($lastCheckData[$itemNameId]['samples'])) {
+                    foreach ($lastCheckData[$itemNameId]['samples'] as $sample) {
+                        if ($type === 'SINGLE' && isset($sample['single_value'])) {
+                            $lastCheckValues[] = $sample['single_value'];
+                        } elseif ($type === 'BEFORE_AFTER' && isset($sample['before_after_value'])) {
+                            $beforeAfter = $sample['before_after_value'];
+                            $lastCheckValues[] = [
+                                'before' => $beforeAfter['before'] ?? null,
+                                'after' => $beforeAfter['after'] ?? null,
+                            ];
+                        } elseif ($nature === 'QUALITATIVE' && isset($sample['qualitative_value'])) {
+                            $lastCheckValues[] = $sample['qualitative_value'];
+                        }
+                    }
+                }
+
+                // nilai current dari request
+                foreach ($newResults as $result) {
+                    if ($result['measurement_item_name_id'] === $itemNameId && isset($result['samples'])) {
+                        foreach ($result['samples'] as $sample) {
+                            if ($type === 'SINGLE' && isset($sample['single_value'])) {
+                                $currentValues[] = $sample['single_value'];
+                            } elseif ($type === 'BEFORE_AFTER' && isset($sample['before_after_value'])) {
+                                $beforeAfter = $sample['before_after_value'];
+                                $currentValues[] = [
+                                    'before' => $beforeAfter['before'] ?? null,
+                                    'after' => $beforeAfter['after'] ?? null,
+                                ];
+                            } elseif ($nature === 'QUALITATIVE' && isset($sample['qualitative_value'])) {
+                                $currentValues[] = $sample['qualitative_value'];
+                            }
+                        }
+                        break;
+                    }
+                }
+
+                $needReCheckWarnings[] = [
+                    'measurement_item_name_id' => $itemNameId,
+                    'level' => 'CRITICAL',
+                    'reason' => "Raw data berubah dari hasil check terakhir tetapi belum di-validate ulang",
+                    'action' => 'Silakan hit endpoint /samples/check untuk item ini terlebih dahulu',
+                    'last_check_values' => $lastCheckValues,
+                    'current_values' => $currentValues,
+                    'type' => 'RAW_DATA_CHANGED_NOT_VALIDATED'
+                ];
+            }
+
+            // ✅ Level 2: dependency warnings (item lain yang terpengaruh perubahan)
+            $dependencyWarnings = $this->validateDependencies($measurement->product, $existingResults, $changedItems);
+
+            $allWarnings = array_merge($needReCheckWarnings, $dependencyWarnings);
+
+            if (!empty($allWarnings)) {
+                $criticalCount = count(array_filter($allWarnings, fn($w) => ($w['level'] ?? '') === 'CRITICAL'));
+                $dependencyCount = count($dependencyWarnings);
+
+                $errorMessage = "Tidak dapat submit measurement karena ada data yang perlu di-validate ulang";
+
+                if ($criticalCount > 0) {
+                    $errorMessage .= ": {$criticalCount} item dengan raw data berubah belum di-check ulang";
+                }
+                if ($dependencyCount > 0) {
+                    $errorMessage .= ($criticalCount > 0 ? ", " : ": ") . "{$dependencyCount} item terpengaruh perubahan dependency";
+                }
+
+                return $this->errorResponse(
+                    $errorMessage,
+                    'VALIDATION_REQUIRED',
+                    400,
+                    [
+                        'warnings' => $allWarnings,
+                        'critical_count' => $criticalCount,
+                        'dependency_count' => $dependencyCount,
+                    ]
+                );
+            }
+
+            // ✅ Sampai sini: data aman → hitung ulang status tiap item & overall_result dengan helper controller
+
+            // Set measurement_results sementara untuk build context
+            $measurement->measurement_results = $existingResults;
+            $context = $this->buildMeasurementContext($measurement);
+
+            $processedResults = [];
+            $overallStatus = true;
+
+            // Build map measurement point by name_id
+            $measurementPointMap = [];
+            foreach ($measurementPoints as $point) {
+                if (isset($point['setup']['name_id'])) {
+                    $measurementPointMap[$point['setup']['name_id']] = $point;
+                }
+            }
+
+            foreach ($existingResults as $item) {
+                $itemNameId = $item['measurement_item_name_id'] ?? null;
+                if (!$itemNameId || !isset($measurementPointMap[$itemNameId])) {
+                    continue;
+                }
+
+                $point = $measurementPointMap[$itemNameId];
+
+                // Rebuild variable_values lengkap dengan context terbaru
+                $currentVariables = $item['variable_values'] ?? [];
+                $rebuiltVariables = $this->buildCompleteVariableValues($point, $currentVariables, $context);
+
+                $measurementItemData = [
+                    'measurement_item_name_id' => $itemNameId,
+                    'variable_values' => $rebuiltVariables,
+                    'samples' => $item['samples'] ?? [],
+                ];
+
+                $processedSamples = $this->processSampleItem($measurementItemData, $point, $context);
+                $evaluated = $this->evaluateSampleItem($processedSamples, $point, $measurementItemData, $context);
+
+                $itemStatus = $evaluated['status'];
+                if ($itemStatus !== true) {
+                    $overallStatus = false;
+                }
+
+                $finalItem = [
+                    'measurement_item_name_id' => $itemNameId,
+                    'status' => $itemStatus,
+                    'variable_values' => $evaluated['variable_values'] ?? $rebuiltVariables,
+                    'samples' => $evaluated['samples'] ?? $processedSamples,
+                    'joint_setting_formula_values' => $evaluated['joint_setting_formula_values'] ?? ($item['joint_setting_formula_values'] ?? null),
+                    'created_at' => $item['created_at'] ?? now()->toISOString(),
+                    'updated_at' => now()->toISOString(),
+                ];
+
+                $processedResults[] = $finalItem;
+
+                // Update context supaya item berikutnya bisa cross-reference hasil ini
+                $context[$itemNameId] = [
+                    'samples' => $finalItem['samples'],
+                    'variable_values' => $finalItem['variable_values'],
+                    'status' => $finalItem['status'],
+                    'joint_setting_formula_values' => $finalItem['joint_setting_formula_values'],
+                ];
+            }
+
+            // Update measurement ke COMPLETED + simpan hasil akhir + waktu submit
             $measurement->update([
                 'status' => 'COMPLETED',
-                'overall_result' => $result['overall_status'],
-                'measurement_results' => $result['measurement_results'],
+                'overall_result' => $overallStatus,
+                'measurement_results' => $processedResults,
+                'measured_at' => now(),
+                'submitted_at' => now(),
             ]);
 
-            // Enhanced response with detailed evaluation results
-            $evaluationSummary = $this->generateEvaluationSummary($result['measurement_results']);
+            $evaluationSummary = $this->generateEvaluationSummary($processedResults);
 
             return $this->successResponse([
-                'status' => $result['overall_status'],
-                'overall_result' => $result['overall_status'] ? 'OK' : 'NG',
+                'status' => $overallStatus,
+                'overall_result' => $overallStatus ? 'OK' : 'NG',
                 'evaluation_summary' => $evaluationSummary,
-                'samples' => $result['measurement_results'],
+                'samples' => $processedResults,
             ], 'Measurement results processed successfully');
 
         } catch (\Exception $e) {

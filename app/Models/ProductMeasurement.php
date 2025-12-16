@@ -26,6 +26,7 @@ class ProductMeasurement extends Model
         'last_check_data',
         'measured_by',
         'measured_at',
+        'submitted_at',
         'due_date',
         'notes'
     ];
@@ -35,6 +36,7 @@ class ProductMeasurement extends Model
         'measurement_results' => 'array',
         'last_check_data' => 'array',
         'measured_at' => 'datetime',
+        'submitted_at' => 'datetime',
         'due_date' => 'datetime',
         'measurement_type' => MeasurementType::class,
         'sample_status' => SampleStatus::class,
