@@ -1664,10 +1664,12 @@ class ProductMeasurementController extends Controller
                 'measurement_results.*.variable_values.*.name_id' => 'required_with:measurement_results.*.variable_values|string',
                 'measurement_results.*.variable_values.*.value' => 'required_with:measurement_results.*.variable_values',
                 'measurement_results.*.samples' => 'nullable|array',
-                'measurement_results.*.samples.*.sample_index' => 'required_with:measurement_results.*.samples|integer',
+                'measurement_results.*.samples.*.sample_index' => 'required_with:measurement_results.*.samples|integer|min:1',
                 'measurement_results.*.samples.*.status' => 'nullable|boolean',
                 'measurement_results.*.samples.*.single_value' => 'nullable|numeric',
                 'measurement_results.*.samples.*.before_after_value' => 'nullable|array',
+                'measurement_results.*.samples.*.before_after_value.before' => 'required_with:measurement_results.*.samples.*.before_after_value|numeric',
+                'measurement_results.*.samples.*.before_after_value.after' => 'required_with:measurement_results.*.samples.*.before_after_value|numeric',
                 'measurement_results.*.samples.*.qualitative_value' => 'nullable|boolean',
                 'measurement_results.*.samples.*.pre_processing_formula_values' => 'nullable|array',
                 'measurement_results.*.joint_setting_formula_values' => 'nullable|array',
@@ -1844,9 +1846,9 @@ class ProductMeasurementController extends Controller
                                 $rawValues = [];
                                 $setup = $measurementPoint['setup'];
                                 
-                                if ($setup['type'] === 'SINGLE' && isset($sample['single_value'])) {
+                                if (($setup['type'] ?? null) === 'SINGLE' && isset($sample['single_value'])) {
                                     $rawValues['single_value'] = $sample['single_value'];
-                                } elseif ($setup['type'] === 'BEFORE_AFTER' && isset($sample['before_after_value'])) {
+                                } elseif (($setup['type'] ?? null) === 'BEFORE_AFTER' && isset($sample['before_after_value'])) {
                                     $rawValues['before_after_value'] = $sample['before_after_value'];
                                 }
 
@@ -2125,8 +2127,8 @@ class ProductMeasurementController extends Controller
                 'measurement_results.*.variable_values' => 'nullable|array',
                 'measurement_results.*.variable_values.*.name_id' => 'required_with:measurement_results.*.variable_values|string',
                 'measurement_results.*.variable_values.*.value' => 'required_with:measurement_results.*.variable_values',
-                'measurement_results.*.samples' => 'required|array|min:1',
-                'measurement_results.*.samples.*.sample_index' => 'required|integer|min:1',
+                'measurement_results.*.samples' => 'nullable|array',
+                'measurement_results.*.samples.*.sample_index' => 'required_with:measurement_results.*.samples|integer|min:1',
                 'measurement_results.*.samples.*.status' => 'nullable|boolean',
                 'measurement_results.*.samples.*.single_value' => 'nullable|numeric',
                 'measurement_results.*.samples.*.before_after_value' => 'nullable|array',
