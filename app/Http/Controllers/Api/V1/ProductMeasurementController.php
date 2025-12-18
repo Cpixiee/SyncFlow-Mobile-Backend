@@ -2546,6 +2546,7 @@ class ProductMeasurementController extends Controller
                     'joint_setting_formula_values' => $evaluated['joint_setting_formula_values'] ?? ($item['joint_setting_formula_values'] ?? null),
                     'created_at' => $item['created_at'] ?? now()->toISOString(),
                     'updated_at' => now()->toISOString(),
+                    'submitted_at' => now()->toISOString(),
                 ];
 
                 $processedResults[] = $finalItem;
