@@ -3026,9 +3026,66 @@ class ProductMeasurementController extends Controller
                     
                     // ✅ FIX: Collect values for ALL QUANTITATIVE measurements (for min/max calculation)
                     if ($nature === 'QUANTITATIVE') {
-                        $singleValue = $sample['single_value'] ?? null;
-                        if ($singleValue !== null && is_numeric($singleValue)) {
-                            $values[] = (float)$singleValue;
+                        $setup = $point['setup'] ?? [];
+                        $type = $setup['type'] ?? null;
+                        
+                        // For SINGLE type: use single_value
+                        if ($type === 'SINGLE') {
+                            $singleValue = $sample['single_value'] ?? null;
+                            if ($singleValue !== null && is_numeric($singleValue)) {
+                                $values[] = (float)$singleValue;
+                            }
+                        } 
+                        // For BEFORE_AFTER type: use pre-processing formula values (usually 'difference' or final formula)
+                        elseif ($type === 'BEFORE_AFTER') {
+                            $preProcessingValues = $sample['pre_processing_formula_values'] ?? [];
+                            $valueFound = false;
+                            
+                            if (!empty($preProcessingValues) && is_array($preProcessingValues)) {
+                                // Try to find the final value or 'difference' value
+                                foreach ($preProcessingValues as $formulaValue) {
+                                    // Use the value if it's marked as final or if it's named 'difference'
+                                    if (isset($formulaValue['value']) && is_numeric($formulaValue['value'])) {
+                                        $formulaName = $formulaValue['name'] ?? '';
+                                        // For BEFORE_AFTER, usually 'difference' is the value used for evaluation
+                                        if ($formulaName === 'difference' || ($formulaValue['is_final_value'] ?? false)) {
+                                            $values[] = (float)$formulaValue['value'];
+                                            $valueFound = true;
+                                            break; // Use first matching value
+                                        }
+                                    }
+                                }
+                                // If no specific formula found, use first numeric value
+                                if (!$valueFound) {
+                                    foreach ($preProcessingValues as $formulaValue) {
+                                        if (isset($formulaValue['value']) && is_numeric($formulaValue['value'])) {
+                                            $values[] = (float)$formulaValue['value'];
+                                            $valueFound = true;
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // ✅ FIX: Fallback - calculate difference manually if pre_processing_formula_values not available
+                            if (!$valueFound && isset($sample['before_after_value'])) {
+                                $beforeAfter = $sample['before_after_value'];
+                                $before = $beforeAfter['before'] ?? null;
+                                $after = $beforeAfter['after'] ?? null;
+                                
+                                if ($before !== null && is_numeric($before) && $after !== null && is_numeric($after) && $before != 0) {
+                                    // Calculate difference: (before - after) / before * 100
+                                    $difference = (($before - $after) / $before) * 100;
+                                    $values[] = (float)$difference;
+                                }
+                            }
+                        }
+                        // For other types or if type is not set, try single_value as fallback
+                        else {
+                            $singleValue = $sample['single_value'] ?? null;
+                            if ($singleValue !== null && is_numeric($singleValue)) {
+                                $values[] = (float)$singleValue;
+                            }
                         }
                     }
                     
