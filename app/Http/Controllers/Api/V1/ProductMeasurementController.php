@@ -558,6 +558,19 @@ class ProductMeasurementController extends Controller
                 return $this->notFoundResponse('Product measurement tidak ditemukan');
             }
 
+            // ✅ FIX: Check if batch_number already exists (unique validation)
+            $existingMeasurement = ProductMeasurement::where('batch_number', $request->batch_number)
+                ->where('measurement_id', '!=', $productMeasurementId)
+                ->first();
+            
+            if ($existingMeasurement) {
+                return $this->errorResponse(
+                    'Batch number sudah digunakan. Silakan gunakan batch number yang berbeda.',
+                    'DUPLICATE_BATCH_NUMBER',
+                    400
+                );
+            }
+
             // Update batch_number dan status
             $measurement->update([
                 'batch_number' => $request->batch_number,
@@ -1672,6 +1685,7 @@ class ProductMeasurementController extends Controller
                 'measurement_results.*.samples.*.before_after_value.after' => 'required_with:measurement_results.*.samples.*.before_after_value|numeric',
                 'measurement_results.*.samples.*.qualitative_value' => 'nullable|boolean',
                 'measurement_results.*.samples.*.pre_processing_formula_values' => 'nullable|array',
+                'measurement_results.*.samples.*.measurement_time' => 'nullable|date',
                 'measurement_results.*.joint_setting_formula_values' => 'nullable|array',
             ]);
 
@@ -2136,6 +2150,7 @@ class ProductMeasurementController extends Controller
                 'measurement_results.*.samples.*.before_after_value.after' => 'required_with:measurement_results.*.samples.*.before_after_value|numeric',
                 'measurement_results.*.samples.*.qualitative_value' => 'nullable|boolean',
                 'measurement_results.*.samples.*.pre_processing_formula_values' => 'nullable|array',
+                'measurement_results.*.samples.*.measurement_time' => 'nullable|date',
                 'measurement_results.*.joint_setting_formula_values' => 'nullable|array',
             ]);
 
@@ -2491,6 +2506,128 @@ class ProductMeasurementController extends Controller
                         'warnings' => $allWarnings,
                         'critical_count' => $criticalCount,
                         'dependency_count' => $dependencyCount,
+                    ]
+                );
+            }
+
+            // ✅ FIX: Validasi comprehensive untuk submit
+            // 1. Validasi jumlah sample match dengan sample_amount
+            // 2. Validasi semua formula terisi (preprocessing, variable, joint)
+            $validationErrors = [];
+            
+            foreach ($existingResults as $item) {
+                $itemNameId = $item['measurement_item_name_id'] ?? null;
+                if (!$itemNameId) {
+                    continue;
+                }
+                
+                // Find measurement point
+                $measurementPoint = null;
+                foreach ($measurementPoints as $mp) {
+                    if (isset($mp['setup']['name_id']) && $mp['setup']['name_id'] === $itemNameId) {
+                        $measurementPoint = $mp;
+                        break;
+                    }
+                }
+                
+                if (!$measurementPoint) {
+                    continue;
+                }
+                
+                $setup = $measurementPoint['setup'] ?? [];
+                $requiredSampleAmount = $setup['sample_amount'] ?? 0;
+                $samples = $item['samples'] ?? [];
+                $actualSampleCount = count($samples);
+                
+                // Validasi jumlah sample
+                if ($requiredSampleAmount > 0 && $actualSampleCount !== $requiredSampleAmount) {
+                    $validationErrors[] = [
+                        'measurement_item_name_id' => $itemNameId,
+                        'field' => 'samples',
+                        'message' => "Jumlah sample tidak sesuai. Diperlukan: {$requiredSampleAmount}, Diberikan: {$actualSampleCount}",
+                    ];
+                }
+                
+                // Validasi preprocessing formulas
+                $preProcessingFormulas = $measurementPoint['pre_processing_formulas'] ?? [];
+                if (!empty($preProcessingFormulas)) {
+                    foreach ($samples as $sampleIndex => $sample) {
+                        $preProcessingValues = $sample['pre_processing_formula_values'] ?? [];
+                        if (empty($preProcessingValues)) {
+                            $validationErrors[] = [
+                                'measurement_item_name_id' => $itemNameId,
+                                'field' => "samples.{$sampleIndex}.pre_processing_formula_values",
+                                'message' => "Pre-processing formula values belum terisi untuk sample index " . ($sample['sample_index'] ?? ($sampleIndex + 1)),
+                            ];
+                        } else {
+                            // Check if all formulas are present
+                            $formulaNames = array_column($preProcessingFormulas, 'name');
+                            $providedNames = array_column($preProcessingValues, 'name');
+                            $missingFormulas = array_diff($formulaNames, $providedNames);
+                            if (!empty($missingFormulas)) {
+                                $validationErrors[] = [
+                                    'measurement_item_name_id' => $itemNameId,
+                                    'field' => "samples.{$sampleIndex}.pre_processing_formula_values",
+                                    'message' => "Pre-processing formula belum lengkap. Missing: " . implode(', ', $missingFormulas),
+                                ];
+                            }
+                        }
+                    }
+                }
+                
+                // Validasi variable values (FORMULA type harus terisi)
+                $variables = $measurementPoint['variables'] ?? [];
+                $variableValues = $item['variable_values'] ?? [];
+                $variableValueMap = [];
+                foreach ($variableValues as $vv) {
+                    $variableValueMap[$vv['name_id'] ?? ''] = $vv;
+                }
+                
+                foreach ($variables as $variable) {
+                    $varName = $variable['name'] ?? null;
+                    $varType = $variable['type'] ?? null;
+                    
+                    if ($varType === 'FORMULA' && $varName) {
+                        if (!isset($variableValueMap[$varName])) {
+                            $validationErrors[] = [
+                                'measurement_item_name_id' => $itemNameId,
+                                'field' => "variable_values.{$varName}",
+                                'message' => "Variable formula '{$varName}' belum terisi",
+                            ];
+                        } else {
+                            $varValue = $variableValueMap[$varName]['value'] ?? null;
+                            if ($varValue === null) {
+                                $validationErrors[] = [
+                                    'measurement_item_name_id' => $itemNameId,
+                                    'field' => "variable_values.{$varName}",
+                                    'message' => "Variable formula '{$varName}' value masih null (dependencies mungkin belum terpenuhi)",
+                                ];
+                            }
+                        }
+                    }
+                }
+                
+                // Validasi joint setting formula values (jika ada joint_setting)
+                $jointSetting = $measurementPoint['evaluation_setting']['joint_setting'] ?? null;
+                if ($jointSetting !== null) {
+                    $jointFormulaValues = $item['joint_setting_formula_values'] ?? null;
+                    if (empty($jointFormulaValues)) {
+                        $validationErrors[] = [
+                            'measurement_item_name_id' => $itemNameId,
+                            'field' => 'joint_setting_formula_values',
+                            'message' => "Joint setting formula values belum terisi",
+                        ];
+                    }
+                }
+            }
+            
+            if (!empty($validationErrors)) {
+                return $this->errorResponse(
+                    'Validasi gagal: Data yang diperlukan belum lengkap',
+                    'VALIDATION_INCOMPLETE',
+                    400,
+                    [
+                        'validation_errors' => $validationErrors,
                     ]
                 );
             }
@@ -2875,7 +3012,7 @@ class ProductMeasurementController extends Controller
                 $sampleAmount = count($samples);
                 $pointOkCount = 0;
                 $pointNgCount = 0;
-                $values = []; // For statistical calculations (only for PER_SAMPLE QUANTITATIVE)
+                $values = []; // ✅ FIX: For statistical calculations - collect for all QUANTITATIVE (not just PER_SAMPLE)
 
                 $processedSamples = [];
                 foreach ($samples as $sample) {
@@ -2886,6 +3023,14 @@ class ProductMeasurementController extends Controller
                     // Convert to boolean for comparison
                     $isOk = ($sampleStatus === true || $sampleStatus === 'ok' || $sampleStatus === 1);
                     $isNg = ($sampleStatus === false || $sampleStatus === 'ng' || $sampleStatus === 0);
+                    
+                    // ✅ FIX: Collect values for ALL QUANTITATIVE measurements (for min/max calculation)
+                    if ($nature === 'QUANTITATIVE') {
+                        $singleValue = $sample['single_value'] ?? null;
+                        if ($singleValue !== null && is_numeric($singleValue)) {
+                            $values[] = (float)$singleValue;
+                        }
+                    }
                     
                     // Determine status based on evaluation type
                     if ($evaluationType === 'PER_SAMPLE' && $nature === 'QUANTITATIVE') {
@@ -2900,20 +3045,9 @@ class ProductMeasurementController extends Controller
                             $pointNgCount++;
                             $ngCount++;
                         }
-                        
-                        // Collect values for statistical calculations (PER_SAMPLE only)
-                        $singleValue = $sample['single_value'] ?? null;
-                        if ($singleValue !== null && is_numeric($singleValue)) {
-                            $values[] = (float)$singleValue;
-                        }
                     } elseif ($evaluationType === 'JOINT' && $nature === 'QUANTITATIVE') {
                         // For JOINT, all samples share the same status (based on final value evaluation)
                         // Don't count here, will be counted after loop based on item status
-                        // But still collect values for potential statistical calculations
-                        $singleValue = $sample['single_value'] ?? null;
-                        if ($singleValue !== null && is_numeric($singleValue)) {
-                            $values[] = (float)$singleValue;
-                        }
                     } elseif ($evaluationType === 'SKIP_CHECK') {
                         // ✅ FIX: SKIP_CHECK means no checking is performed - don't count OK or NG
                         // Just collect data, no evaluation
@@ -2935,6 +3069,7 @@ class ProductMeasurementController extends Controller
                         'single_value' => $sample['single_value'] ?? null,
                         'before_after_value' => $sample['before_after_value'] ?? null,
                         'qualitative_value' => $sample['qualitative_value'] ?? null,
+                        'measurement_time' => $sample['measurement_time'] ?? null, // ✅ FIX: Include measurement_time
                     ];
                 }
 
@@ -2973,6 +3108,15 @@ class ProductMeasurementController extends Controller
                     }
                 }
 
+                // ✅ FIX: Calculate min/max for all QUANTITATIVE measurements (not just PER_SAMPLE)
+                // Calculate maximum_value and minimum_value for all QUANTITATIVE with values
+                $maximumValue = null;
+                $minimumValue = null;
+                if ($nature === 'QUANTITATIVE' && !empty($values)) {
+                    $maximumValue = max($values);
+                    $minimumValue = min($values);
+                }
+                
                 // Calculate statistical values (only for PER_SAMPLE QUANTITATIVE with data > 1)
                 // ✅ FIX: For SKIP_CHECK, ok and ng should be 0 (no checking performed, just data collection)
                 $summary = [
@@ -2980,8 +3124,8 @@ class ProductMeasurementController extends Controller
                     'ok' => $evaluationType === 'SKIP_CHECK' ? 0 : $pointOkCount,
                     'ng' => $evaluationType === 'SKIP_CHECK' ? 0 : $pointNgCount,
                     'ng_ratio' => ($evaluationType === 'SKIP_CHECK' || $sampleAmount === 0) ? 0 : (($pointNgCount / $sampleAmount) * 100),
-                    'maximum_value' => null,
-                    'minimum_value' => null,
+                    'maximum_value' => $maximumValue,
+                    'minimum_value' => $minimumValue,
                     'sigma' => null,
                     'sigma_3' => null,
                     'sigma_6' => null,
@@ -2992,9 +3136,6 @@ class ProductMeasurementController extends Controller
                 // ✅ FIX: Calculate sigma, CP, CPK only for PER_SAMPLE QUANTITATIVE with more than 1 sample
                 // Also ensure values array is populated
                 if ($evaluationType === 'PER_SAMPLE' && $nature === 'QUANTITATIVE' && count($values) > 1) {
-                    $summary['maximum_value'] = max($values);
-                    $summary['minimum_value'] = min($values);
-                    
                     $sigma = StatisticalHelper::calculateStandardDeviation($values);
                     $summary['sigma'] = $sigma;
                     $summary['sigma_3'] = StatisticalHelper::calculateNSigma($sigma, 3);
@@ -3038,15 +3179,17 @@ class ProductMeasurementController extends Controller
             }
 
             // Calculate overall summary
-            // ✅ FIX: array_column doesn't support nested keys, need to extract manually
-            // For totalSamples, count all samples (including SKIP_CHECK - they still collect data)
-            // But for OK/NG ratio calculation, only count samples that were actually evaluated
-            $totalSamples = 0;
+            // ✅ FIX: summary.sample = max sample count dari semua measurement items (bukan total)
+            $maxSampleCount = 0;
             $totalEvaluatedSamples = 0; // Samples that were actually evaluated (not SKIP_CHECK)
             
             foreach ($measurementPointResults as $pointResult) {
                 $sampleAmount = $pointResult['summary']['sample_amount'] ?? 0;
-                $totalSamples += $sampleAmount;
+                
+                // Track max sample count
+                if ($sampleAmount > $maxSampleCount) {
+                    $maxSampleCount = $sampleAmount;
+                }
                 
                 // Check if this measurement point is SKIP_CHECK
                 $itemNameId = $pointResult['name_id'] ?? null;
@@ -3064,7 +3207,7 @@ class ProductMeasurementController extends Controller
             }
             
             $summary = [
-                'sample' => $totalSamples, // Total samples collected (including SKIP_CHECK)
+                'sample' => $maxSampleCount, // Max sample count dari semua measurement items
                 'ok' => $okCount,
                 'ng' => $ngCount,
                 'ng_ratio' => $totalEvaluatedSamples > 0 ? ($ngCount / $totalEvaluatedSamples) * 100 : 0,

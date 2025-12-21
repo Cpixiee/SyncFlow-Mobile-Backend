@@ -64,12 +64,16 @@ tags:
     description: Measurement data operations
   - name: Product Measurements
     description: Product measurement lifecycle management
+  - name: Scale Measurements
+    description: Daily weight tracking measurements
   - name: Measurement Instruments
     description: Measurement instrument management
   - name: Tools
     description: Tool/equipment management
   - name: Issues
     description: Issue tracking and collaboration
+  - name: Notifications
+    description: Notification management
 
 security:
   - BearerAuth: []
@@ -230,21 +234,36 @@ components:
 
     ChangePasswordRequest:
       type: object
-      required:
-        - current_password
-        - new_password
+      description: |
+        Change password request. 
+        - For user changing own password: requires current_password, new_password, new_password_confirmation
+        - For admin resetting other user's password: requires target_user_id, new_password, new_password_confirmation (no current_password needed)
       properties:
         current_password:
           type: string
           format: password
+          description: Required only when user changes own password (not for admin reset)
+          example: "oldPassword123"
         new_password:
           type: string
           format: password
           minLength: 6
-        user_id:
+          description: New password (must be different from current)
+          example: "newPassword123"
+        new_password_confirmation:
+          type: string
+          format: password
+          minLength: 6
+          description: Confirmation of new password (must match new_password)
+          example: "newPassword123"
+        target_user_id:
           type: integer
-          description: Required for admin password reset
+          description: Required for admin/SuperAdmin resetting other user's password
           example: 5
+        force_change:
+          type: boolean
+          description: Optional - if true, user must change password on next login (admin reset only)
+          example: false
 
     # Product Schemas
     ProductBasicInfo:
@@ -727,6 +746,81 @@ components:
           type: string
           example: Working on this issue
 
+    # Scale Measurement Schemas
+    ScaleMeasurement:
+      type: object
+      properties:
+        scale_measurement_id:
+          type: string
+          example: "SCL-X1Y2Z3A4"
+        product_id:
+          type: string
+          example: "PRD-A1B2C3D4"
+        measurement_date:
+          type: string
+          format: date
+          example: "2025-12-02"
+        weight:
+          type: number
+          format: float
+          nullable: true
+          example: 4.5
+        status:
+          type: string
+          enum: [NOT_CHECKED, CHECKED]
+          example: "CHECKED"
+        notes:
+          type: string
+          nullable: true
+        product:
+          type: object
+          properties:
+            id:
+              type: string
+            product_name:
+              type: string
+            product_category_name:
+              type: string
+            article_code:
+              type: string
+        measured_by:
+          type: object
+          nullable: true
+          properties:
+            username:
+              type: string
+            employee_id:
+              type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    # Notification Schemas
+    Notification:
+      type: object
+      properties:
+        id:
+          type: integer
+        type:
+          type: string
+        title:
+          type: string
+        message:
+          type: string
+        read_at:
+          type: string
+          format: date-time
+          nullable: true
+        data:
+          type: object
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+
     # Product Measurement Schemas
     ProductMeasurement:
       type: object
@@ -734,6 +828,9 @@ components:
         id:
           type: integer
           example: 1
+        measurement_id:
+          type: string
+          example: "MSR-ABC123XY"
         product_id:
           type: integer
           example: 1
@@ -743,20 +840,73 @@ components:
           example: FULL_MEASUREMENT
         due_date:
           type: string
-          format: date
-          example: '2024-12-31'
+          format: date-time
+          nullable: true
+          example: '2024-12-31 00:00:00'
         status:
           type: string
-          example: NOT_STARTED
+          enum: [TODO, PENDING, IN_PROGRESS, COMPLETED, CANCELLED]
+          example: IN_PROGRESS
+        sample_status:
+          type: string
+          enum: [OK, NG, NOT_COMPLETE]
+          example: NOT_COMPLETE
+        overall_result:
+          type: boolean
+          nullable: true
+          description: Overall OK/NG result (true = OK, false = NG)
         batch_number:
           type: string
           nullable: true
+          example: "BATCH-2024-001"
+        sample_count:
+          type: integer
+          example: 3
         measurement_results:
           type: array
+          nullable: true
           items:
             type: object
+            properties:
+              measurement_item_name_id:
+                type: string
+              status:
+                type: boolean
+              variable_values:
+                type: array
+              samples:
+                type: array
+                nullable: true
+              joint_setting_formula_values:
+                type: array
+                nullable: true
+              created_at:
+                type: string
+                format: date-time
+              updated_at:
+                type: string
+                format: date-time
+              submitted_at:
+                type: string
+                format: date-time
+                nullable: true
+                description: Timestamp when submitted (only present after submit)
+        last_check_data:
+          type: object
+          nullable: true
+          description: Last check data (jejak) for validation
         product:
           $ref: '#/components/schemas/Product'
+        measured_by:
+          type: object
+          nullable: true
+        measured_at:
+          type: string
+          format: date-time
+          nullable: true
+        notes:
+          type: string
+          nullable: true
         created_at:
           type: string
           format: date-time
@@ -895,13 +1045,32 @@ paths:
       tags:
         - Authentication
       summary: Change password
-      description: Change user password (or admin reset for other users)
+      description: |
+        Change user password. Supports two modes:
+        1. **User changing own password**: Requires current_password, new_password, new_password_confirmation
+        2. **Admin/SuperAdmin resetting other user's password**: Requires target_user_id, new_password, new_password_confirmation (no current_password needed)
+        
+        Optional `force_change` parameter (admin only): If true, user must change password on next login.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               $ref: '#/components/schemas/ChangePasswordRequest'
+            examples:
+              user_own_password:
+                summary: User changing own password
+                value:
+                  current_password: "oldPassword123"
+                  new_password: "newPassword123"
+                  new_password_confirmation: "newPassword123"
+              admin_reset:
+                summary: Admin resetting user password
+                value:
+                  target_user_id: 5
+                  new_password: "tempPassword123"
+                  new_password_confirmation: "tempPassword123"
+                  force_change: true
       responses:
         '200':
           description: Password changed successfully
@@ -909,6 +1078,29 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SuccessResponse'
+              example:
+                http_code: 200
+                message: "Password changed successfully"
+                error_id: null
+                data:
+                  id: 5
+                  user_id: 5
+                  username: "user123"
+                  role: "operator"
+                  must_change_password: false
+                  password_changed_at: "2025-12-18 15:30:00"
+                  is_force_change: false
+                  changed_by_admin: false
+        '400':
+          description: Validation error (wrong current password, new password same as current, etc.)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthorized
+        '404':
+          description: Target user not found (for admin reset)
 
   /v1/update-user:
     put:
@@ -1349,6 +1541,67 @@ paths:
                     items:
                       $ref: '#/components/schemas/ProductCategory'
 
+  /v1/products/from-existing:
+    post:
+      tags:
+        - Products
+      summary: Create product from existing product (Admin/SuperAdmin only)
+      description: Create a new product by copying configuration from an existing product
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - source_product_id
+                - basic_info
+              properties:
+                source_product_id:
+                  type: string
+                  description: Product ID to copy from
+                  example: "PRD-ABC123XY"
+                basic_info:
+                  $ref: '#/components/schemas/ProductBasicInfo'
+                measurement_points:
+                  type: array
+                  description: Optional - override measurement points
+                measurement_groups:
+                  type: array
+                  description: Optional - override measurement groups
+      responses:
+        '201':
+          description: Product created successfully
+  /v1/products/master-products:
+    get:
+      tags:
+        - Products
+      summary: Get master products list
+      description: Get list of master products that haven't been created yet (available for all authenticated users)
+      parameters:
+        - name: product_category_id
+          in: query
+          schema:
+            type: integer
+          description: Filter by product category ID
+        - name: query
+          in: query
+          schema:
+            type: string
+          description: Search query
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+      responses:
+        '200':
+          description: Master products retrieved successfully
   /v1/products/{productId}/measurement-items/suggest:
     get:
       tags:
@@ -1840,7 +2093,285 @@ paths:
         '200':
           description: Comment deleted successfully
 
+  # Scale Measurement Endpoints
+  /v1/scale-measurement:
+    get:
+      tags:
+        - Scale Measurements
+      summary: Get scale measurements list
+      description: Get paginated list of scale measurements (daily weight tracking) with optional filters
+      parameters:
+        - name: date
+          in: query
+          schema:
+            type: string
+            format: date
+          description: Filter by specific date (YYYY-MM-DD)
+        - name: start_date
+          in: query
+          schema:
+            type: string
+            format: date
+          description: Filter range start date
+        - name: end_date
+          in: query
+          schema:
+            type: string
+            format: date
+          description: Filter range end date
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [NOT_CHECKED, CHECKED]
+          description: Filter by status
+        - name: product_category_id
+          in: query
+          schema:
+            type: integer
+          description: Filter by product category
+        - name: query
+          in: query
+          schema:
+            type: string
+          description: Search by product name/code
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+      responses:
+        '200':
+          description: Scale measurements retrieved successfully
+    post:
+      tags:
+        - Scale Measurements
+      summary: Create scale measurement (All users - Operator can create)
+      description: Create a new scale measurement for a product. Operator can create.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - product_id
+                - measurement_date
+              properties:
+                product_id:
+                  type: string
+                  example: "PRD-A1B2C3D4"
+                measurement_date:
+                  type: string
+                  format: date
+                  example: "2025-12-02"
+                weight:
+                  type: number
+                  format: float
+                  minimum: 0
+                  description: Optional - if provided, status becomes CHECKED
+                  example: 4.5
+                notes:
+                  type: string
+                  example: "Pengukuran pagi"
+      responses:
+        '201':
+          description: Scale measurement created successfully
+  /v1/scale-measurement/bulk:
+    post:
+      tags:
+        - Scale Measurements
+      summary: Bulk create scale measurements (All users - Operator can create)
+      description: Create multiple scale measurements at once without weight (status = NOT_CHECKED)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - product_ids
+                - measurement_date
+              properties:
+                product_ids:
+                  type: array
+                  items:
+                    type: string
+                  example: ["PRD-001", "PRD-002", "PRD-003"]
+                measurement_date:
+                  type: string
+                  format: date
+                  example: "2025-12-02"
+      responses:
+        '201':
+          description: Bulk scale measurements created successfully
+  /v1/scale-measurement/available-products:
+    get:
+      tags:
+        - Scale Measurements
+      summary: Get available products for scale measurement
+      description: Get products that don't have scale measurement for the specified date
+      parameters:
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          description: Date to check (YYYY-MM-DD)
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+      responses:
+        '200':
+          description: Available products retrieved successfully
+  /v1/scale-measurement/{scaleMeasurementId}:
+    get:
+      tags:
+        - Scale Measurements
+      summary: Get scale measurement by ID
+      description: Get detailed scale measurement information
+      parameters:
+        - name: scaleMeasurementId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Scale measurement retrieved successfully
+    put:
+      tags:
+        - Scale Measurements
+      summary: Update scale measurement (Admin/SuperAdmin only)
+      description: Update scale measurement weight and notes. Operator cannot update.
+      parameters:
+        - name: scaleMeasurementId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                weight:
+                  type: number
+                  format: float
+                  minimum: 0
+                  example: 5.2
+                notes:
+                  type: string
+                  example: "Updated measurement"
+      responses:
+        '200':
+          description: Scale measurement updated successfully
+        '403':
+          description: Forbidden - Operator cannot update
+    delete:
+      tags:
+        - Scale Measurements
+      summary: Delete scale measurement (Admin/SuperAdmin only)
+      description: Delete a scale measurement. Operator cannot delete.
+      parameters:
+        - name: scaleMeasurementId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Scale measurement deleted successfully
+        '403':
+          description: Forbidden - Operator cannot delete
+
   # Product Measurement Endpoints
+  /v1/product-measurement/progress:
+    get:
+      tags:
+        - Product Measurements
+      summary: Get measurement progress
+      description: Get overall progress statistics for measurements
+      parameters:
+        - name: quarter
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 4
+        - name: year
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Progress retrieved successfully
+  /v1/product-measurement/progress-category:
+    get:
+      tags:
+        - Product Measurements
+      summary: Get progress by category
+      description: Get measurement progress grouped by product category
+      parameters:
+        - name: quarter
+          in: query
+          schema:
+            type: integer
+        - name: year
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Category progress retrieved successfully
+  /v1/product-measurement/progress-all:
+    get:
+      tags:
+        - Product Measurements
+      summary: Get all progress data
+      description: Get comprehensive progress data for all measurements
+      parameters:
+        - name: quarter
+          in: query
+          schema:
+            type: integer
+        - name: year
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: All progress data retrieved successfully
+  /v1/product-measurement/by-product:
+    get:
+      tags:
+        - Product Measurements
+      summary: Get measurements by product
+      description: Get all measurements for a specific product
+      parameters:
+        - name: product_id
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Measurements retrieved successfully
   /v1/product-measurement/available-products:
     get:
       tags:
@@ -1977,23 +2508,83 @@ paths:
       tags:
         - Product Measurements
       summary: Create new measurement
-      description: Create a new measurement entry for a product
+      description: |
+        Create a new measurement entry for a product. 
+        Supports both single product (product_id) and multiple products (product_ids).
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CreateProductMeasurementRequest'
+              type: object
+              properties:
+                product_id:
+                  type: string
+                  description: Single product ID (use with product_ids)
+                  example: "PRD-ABC123XY"
+                product_ids:
+                  type: array
+                  items:
+                    type: string
+                  description: Multiple product IDs (alternative to product_id)
+                  example: ["PRD-001", "PRD-002"]
+                due_date:
+                  type: string
+                  format: date
+                  required: true
+                  example: "2024-12-31"
+                measurement_type:
+                  type: string
+                  enum: [FULL_MEASUREMENT, SCALE_MEASUREMENT]
+                  required: true
+                  example: FULL_MEASUREMENT
+                batch_number:
+                  type: string
+                  nullable: true
+                  description: Optional batch number (auto-generated if not provided)
+                sample_count:
+                  type: integer
+                  nullable: true
+                  description: Optional sample count
+                notes:
+                  type: string
+                  nullable: true
       responses:
         '201':
           description: Measurement created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  http_code:
+                    type: integer
+                    example: 201
+                  message:
+                    type: string
+                    example: "Measurement entry created successfully"
+                  data:
+                    oneOf:
+                      - type: object
+                        properties:
+                          product_measurement_id:
+                            type: string
+                            example: "MSR-ABC123XY"
+                        description: Single product response
+                      - type: object
+                        additionalProperties:
+                          type: string
+                        description: Multiple products response (map of product_id to measurement_id)
+                        example:
+                          "PRD-001": "MSR-ABC123"
+                          "PRD-002": "MSR-DEF456"
 
   /v1/product-measurement/bulk:
     post:
       tags:
         - Product Measurements
       summary: Bulk create measurements
-      description: Create measurements for multiple products
+      description: Create measurements for multiple products at once
       requestBody:
         required: true
         content:
@@ -2001,15 +2592,58 @@ paths:
             schema:
               type: object
               required:
-                - measurements
+                - product_ids
+                - due_date
+                - measurement_type
               properties:
-                measurements:
+                product_ids:
                   type: array
                   items:
-                    $ref: '#/components/schemas/CreateProductMeasurementRequest'
+                    type: string
+                  description: Array of product IDs
+                  example: ["PRD-001", "PRD-002", "PRD-003"]
+                due_date:
+                  type: string
+                  format: date
+                  example: "2024-12-31"
+                measurement_type:
+                  type: string
+                  enum: [FULL_MEASUREMENT, SCALE_MEASUREMENT]
+                  example: FULL_MEASUREMENT
+                batch_number:
+                  type: string
+                  nullable: true
+                  description: Optional batch number (auto-generated if not provided)
+                sample_count:
+                  type: integer
+                  nullable: true
+                  description: Optional sample count
+                notes:
+                  type: string
+                  nullable: true
       responses:
         '201':
           description: Bulk measurements created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  http_code:
+                    type: integer
+                    example: 201
+                  message:
+                    type: string
+                    example: "Measurement entries created successfully"
+                  data:
+                    type: object
+                    description: Map of product_id to measurement_id
+                    additionalProperties:
+                      type: string
+                    example:
+                      "PRD-001": "MSR-ABC123"
+                      "PRD-002": "MSR-DEF456"
+                      "PRD-003": "MSR-GHI789"
 
   /v1/product-measurement/{productMeasurementId}:
     get:
@@ -2037,6 +2671,48 @@ paths:
                     type: string
                   data:
                     $ref: '#/components/schemas/ProductMeasurement'
+    put:
+      tags:
+        - Product Measurements
+      summary: Update measurement
+      description: Update measurement information
+      parameters:
+        - name: productMeasurementId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                due_date:
+                  type: string
+                  format: date
+                batch_number:
+                  type: string
+                notes:
+                  type: string
+      responses:
+        '200':
+          description: Measurement updated successfully
+    delete:
+      tags:
+        - Product Measurements
+      summary: Delete measurement
+      description: Delete a measurement (Admin only)
+      parameters:
+        - name: productMeasurementId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Measurement deleted successfully
 
   /v1/product-measurement/{productMeasurementId}/set-batch-number:
     post:
@@ -2061,10 +2737,14 @@ paths:
               properties:
                 batch_number:
                   type: string
-                  example: BATCH-2024-001
+                  example: "BATCH-2024-001"
       responses:
         '200':
           description: Batch number set successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
 
   /v1/product-measurement/{productMeasurementId}/samples/check:
     post:
@@ -2102,7 +2782,6 @@ paths:
               type: object
               required:
                 - measurement_item_name_id
-                - samples
               properties:
                 measurement_item_name_id:
                   type: string
@@ -2110,7 +2789,8 @@ paths:
                   example: "thickness_a"
                 samples:
                   type: array
-                  description: Sample measurements
+                  nullable: true
+                  description: Sample measurements (nullable for sample_amount = 0)
                   items:
                     type: object
                     required:
@@ -2118,14 +2798,17 @@ paths:
                     properties:
                       sample_index:
                         type: integer
+                        minimum: 1
                         example: 1
                       single_value:
                         type: number
-                        description: For SINGLE_VALUE evaluation type
+                        nullable: true
+                        description: For SINGLE type evaluation
                         example: 10.5
                       before_after_value:
                         type: object
-                        description: For BEFORE_AFTER evaluation type
+                        nullable: true
+                        description: For BEFORE_AFTER type evaluation
                         properties:
                           before:
                             type: number
@@ -2135,8 +2818,25 @@ paths:
                             example: 10.8
                       qualitative_value:
                         type: boolean
-                        description: For QUALITATIVE evaluation type
+                        nullable: true
+                        description: For QUALITATIVE nature evaluation
                         example: true
+                variable_values:
+                  type: array
+                  nullable: true
+                  description: Manual variable values (optional)
+                  items:
+                    type: object
+                    required:
+                      - name_id
+                      - value
+                    properties:
+                      name_id:
+                        type: string
+                        example: "panjang"
+                      value:
+                        type: number
+                        example: 150
             examples:
               single_value:
                 summary: Single value measurement
@@ -2205,28 +2905,41 @@ paths:
                               type: boolean
                             pre_processing_formula_values:
                               type: array
-                              description: Pre-processing formula results
+                              nullable: true
+                              description: Pre-processing formula results per sample
                               items:
-                                type: number
+                                type: object
+                                properties:
+                                  name:
+                                    type: string
+                                    example: "normalized"
+                                  formula:
+                                    type: string
+                                    example: "=single_value/cross_section"
+                                  value:
+                                    type: number
+                                    nullable: true
+                                    example: 2.304635761589328
+                                  is_show:
+                                    type: boolean
+                                    example: true
                       variable_values:
                         type: array
-                        description: Calculated variable values from formulas
+                        description: Complete variable values (FIXED, MANUAL, FORMULA)
                         items:
                           type: object
                           properties:
-                            name:
+                            name_id:
                               type: string
-                              example: "CROSS_SECTION"
+                              example: "cross_section"
                             value:
                               type: number
                               nullable: true
                               description: Calculated value (null if dependencies not met)
-                              example: 10.5
-                            status:
-                              type: string
-                              example: "OK"
+                              example: 5.033333333333499
                       joint_setting_formula_values:
                         type: array
+                        nullable: true
                         description: Joint formula results (if applicable)
                         items:
                           type: object
@@ -2237,9 +2950,17 @@ paths:
                               type: string
                             is_final_value:
                               type: boolean
+                            is_final:
+                              type: boolean
+                              description: Alternative field name
                             value:
                               type: number
                               nullable: true
+                              description: Calculated value (null if formula fails)
+                            error:
+                              type: string
+                              nullable: true
+                              description: Error message if formula fails
               examples:
                 simple_measurement:
                   summary: Simple measurement (no formulas)
@@ -2362,7 +3083,8 @@ paths:
                         example: true
                       samples:
                         type: array
-                        description: Sample measurements
+                        nullable: true
+                        description: Sample measurements (nullable for derived items with sample_amount = 0)
                         items:
                           type: object
                           properties:
@@ -2371,12 +3093,15 @@ paths:
                               example: 1
                             status:
                               type: boolean
+                              nullable: true
                               example: true
                             single_value:
                               type: number
+                              nullable: true
                               example: 10.5
                             before_after_value:
                               type: object
+                              nullable: true
                               properties:
                                 before:
                                   type: number
@@ -2384,24 +3109,38 @@ paths:
                                   type: number
                             qualitative_value:
                               type: boolean
+                              nullable: true
                             pre_processing_formula_values:
                               type: array
+                              nullable: true
                               items:
-                                type: number
+                                type: object
+                                properties:
+                                  name:
+                                    type: string
+                                  formula:
+                                    type: string
+                                  value:
+                                    type: number
+                                    nullable: true
+                                  is_show:
+                                    type: boolean
                       variable_values:
                         type: array
-                        description: Variable values from formulas
+                        nullable: true
+                        description: Variable values (FIXED, MANUAL, FORMULA)
                         items:
                           type: object
                           properties:
-                            name:
+                            name_id:
                               type: string
-                              example: "CROSS_SECTION"
+                              example: "cross_section"
                             value:
                               type: number
-                              example: 10.5
+                              example: 5.033333333333499
                       joint_setting_formula_values:
                         type: array
+                        nullable: true
                         description: Joint formula results
                         items:
                           type: object
@@ -2412,8 +3151,12 @@ paths:
                               type: string
                             is_final_value:
                               type: boolean
+                            is_final:
+                              type: boolean
+                              description: Alternative field name (same as is_final_value)
                             value:
                               type: number
+                              nullable: true
             examples:
               valid_save:
                 summary: Valid save (will succeed)
@@ -2616,7 +3359,18 @@ paths:
       tags:
         - Product Measurements
       summary: Submit measurement
-      description: Submit final measurement results
+      description: |
+        Submit final measurement results. This endpoint:
+        - Validates all data against last_check_data
+        - Recalculates all formulas with complete context
+        - Sets status to COMPLETED
+        - Updates overall_result (OK/NG)
+        - Sets submitted_at timestamp
+        
+        **IMPORTANT:** 
+        - All measurement items must be validated via /samples/check before submit
+        - If validation fails, returns 400 with warnings
+        - Data is NOT saved if there are validation errors
       parameters:
         - name: productMeasurementId
           in: path
@@ -2629,14 +3383,139 @@ paths:
           application/json:
             schema:
               type: object
+              required:
+                - measurement_results
               properties:
                 measurement_results:
                   type: array
+                  description: Array of measurement results (same structure as save-progress)
                   items:
                     type: object
+                    required:
+                      - measurement_item_name_id
+                    properties:
+                      measurement_item_name_id:
+                        type: string
+                      status:
+                        type: boolean
+                      samples:
+                        type: array
+                        nullable: true
+                      variable_values:
+                        type: array
+                        nullable: true
+                      joint_setting_formula_values:
+                        type: array
+                        nullable: true
       responses:
         '200':
           description: Measurement submitted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  http_code:
+                    type: integer
+                    example: 200
+                  message:
+                    type: string
+                    example: "Measurement results processed successfully"
+                  data:
+                    type: object
+                    properties:
+                      status:
+                        type: boolean
+                        description: Overall status (true = OK, false = NG)
+                      overall_result:
+                        type: string
+                        enum: [OK, NG]
+                      submitted_at:
+                        type: string
+                        format: date-time
+                        description: Timestamp when measurement was submitted
+                      evaluation_summary:
+                        type: object
+                        properties:
+                          total_items:
+                            type: integer
+                          passed_items:
+                            type: integer
+                          failed_items:
+                            type: integer
+                          pass_rate:
+                            type: number
+                          item_details:
+                            type: array
+                      samples:
+                        type: array
+                        description: Final processed measurement results with submitted_at timestamp
+                        items:
+                          type: object
+                          properties:
+                            measurement_item_name_id:
+                              type: string
+                            status:
+                              type: boolean
+                            variable_values:
+                              type: array
+                            samples:
+                              type: array
+                            joint_setting_formula_values:
+                              type: array
+                            created_at:
+                              type: string
+                              format: date-time
+                            updated_at:
+                              type: string
+                              format: date-time
+                            submitted_at:
+                              type: string
+                              format: date-time
+                              description: Timestamp when this item was submitted
+        '400':
+          description: Validation failed - same validation errors as save-progress
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/product-measurement/{productMeasurementId}/result:
+    get:
+      tags:
+        - Product Measurements
+      summary: Get measurement result
+      description: Get detailed measurement result with evaluation summary
+      parameters:
+        - name: productMeasurementId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Measurement result retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  http_code:
+                    type: integer
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      measurement_id:
+                        type: string
+                      status:
+                        type: string
+                      overall_result:
+                        type: boolean
+                      evaluation_summary:
+                        type: object
+                      measurement_results:
+                        type: array
 
   /v1/product-measurement/{productMeasurementId}/create-sample-product:
     post:
@@ -2656,9 +3535,115 @@ paths:
           application/json:
             schema:
               type: object
+              properties:
+                product_category_id:
+                  type: integer
+                  description: Target product category for sample product
       responses:
         '201':
           description: Sample product created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  # Notification Endpoints
+  /v1/notifications:
+    get:
+      tags:
+        - Notifications
+      summary: Get notifications list
+      description: Get paginated list of notifications for current user
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 10
+        - name: read
+          in: query
+          schema:
+            type: boolean
+          description: Filter by read status
+      responses:
+        '200':
+          description: Notifications retrieved successfully
+    delete:
+      tags:
+        - Notifications
+      summary: Delete notification
+      description: Delete a specific notification
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Notification deleted successfully
+  /v1/notifications/unread-count:
+    get:
+      tags:
+        - Notifications
+      summary: Get unread notifications count
+      description: Get count of unread notifications for current user
+      responses:
+        '200':
+          description: Unread count retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  http_code:
+                    type: integer
+                  message:
+                    type: string
+                  data:
+                    type: object
+                    properties:
+                      unread_count:
+                        type: integer
+                        example: 5
+  /v1/notifications/{id}/mark-as-read:
+    post:
+      tags:
+        - Notifications
+      summary: Mark notification as read
+      description: Mark a specific notification as read
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Notification marked as read
+  /v1/notifications/mark-all-as-read:
+    post:
+      tags:
+        - Notifications
+      summary: Mark all notifications as read
+      description: Mark all notifications for current user as read
+      responses:
+        '200':
+          description: All notifications marked as read
+  /v1/notifications/all-read:
+    delete:
+      tags:
+        - Notifications
+      summary: Delete all read notifications
+      description: Delete all read notifications for current user
+      responses:
+        '200':
+          description: All read notifications deleted successfully
 
   # Measurement Endpoints (Legacy/Demo)
   /v1/measurements:
