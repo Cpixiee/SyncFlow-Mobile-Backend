@@ -491,6 +491,8 @@ class AuthController extends Controller
                 'photo_url' => 'nullable|string|url',
                 'phone' => 'nullable|string',
                 'email' => "nullable|email|unique:login_users,email,{$targetUser->id}",
+                // ✅ NEW: Allow user to update their own employee_id (must stay unique)
+                'employee_id' => "nullable|string|unique:login_users,employee_id,{$targetUser->id}",
             ];
 
             $validator = Validator::make($request->all(), $validationRules);
@@ -508,6 +510,8 @@ class AuthController extends Controller
                 'photo_url' => $request->photo_url,
                 'phone' => $request->phone,
                 'email' => $request->email,
+                // ✅ NEW: allow updating employee_id for own profile
+                'employee_id' => $request->employee_id,
             ], function($value) {
                 return $value !== null;
             });
@@ -545,6 +549,78 @@ class AuthController extends Controller
             return $this->errorResponse(
                 'Could not update user information',
                 'USER_UPDATE_ERROR',
+                500
+            );
+        }
+    }
+
+    /**
+     * Update user role (Admin/Superadmin only).
+     *
+     * Hanya mengubah field role user lain.
+     *
+     * @param Request $request
+     * @param int $id
+     * @return JsonResponse
+     */
+    public function updateUserRole(Request $request, int $id): JsonResponse
+    {
+        try {
+            // Auth sudah dicek oleh middleware + role:admin,superadmin
+            $authUser = JWTAuth::parseToken()->authenticate();
+            if (!$authUser) {
+                return $this->unauthorizedResponse('User not authenticated');
+            }
+
+            // Validasi input role
+            $validator = Validator::make($request->all(), [
+                'role' => 'required|in:operator,admin,superadmin',
+            ]);
+
+            if ($validator->fails()) {
+                return $this->validationErrorResponse(
+                    $validator->errors(),
+                    'Request invalid'
+                );
+            }
+
+            // Cari target user
+            $targetUser = LoginUser::find($id);
+            if (!$targetUser) {
+                return $this->notFoundResponse('Target user not found');
+            }
+
+            // Optional: cegah user menurunkan / mengubah rolenya sendiri via endpoint ini
+            if ($authUser->id === $targetUser->id) {
+                return $this->forbiddenResponse('You cannot change your own role using this endpoint');
+            }
+
+            // Update hanya field role
+            $targetUser->update([
+                'role' => $request->role,
+            ]);
+
+            $userData = [
+                'id' => $targetUser->id,
+                'username' => $targetUser->username,
+                'role' => $targetUser->role,
+                'photo_url' => $targetUser->photo_url,
+                'employee_id' => $targetUser->employee_id,
+                'phone' => $targetUser->phone,
+                'email' => $targetUser->email,
+                'position' => $targetUser->position,
+                'department' => $targetUser->department,
+                'updated_at' => $targetUser->updated_at->format('Y-m-d H:i:s'),
+            ];
+
+            return $this->successResponse(
+                $userData,
+                'User role updated successfully'
+            );
+        } catch (\Exception $e) {
+            return $this->errorResponse(
+                'Could not update user role',
+                'USER_ROLE_UPDATE_ERROR',
                 500
             );
         }

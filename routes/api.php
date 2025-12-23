@@ -23,6 +23,12 @@ Route::prefix('v1')->group(function () {
         Route::get('/me', [AuthController::class, 'me']);
         Route::post('/change-password', [AuthController::class, 'changePassword']);
         Route::put('/update-user', [AuthController::class, 'updateUser']);
+        
+        // Admin/Superadmin user management
+        Route::middleware('role:admin,superadmin')->group(function () {
+            // Update user role (only role field)
+            Route::put('/users/{id}/role', [AuthController::class, 'updateUserRole']);
+        });
 
         // Measurement routes - available for authenticated users
         Route::prefix('measurements')->group(function () {
