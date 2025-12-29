@@ -370,16 +370,29 @@ const handleImageUpload = async (event) => {
 
 ### Manual Test via Web
 
-1. Buka browser: `http://your-domain.com/test-upload.html`
+**URL untuk akses test page:**
+- **Production Server:** `http://103.236.140.19:2020/test-upload.html`
+- **Local Development:** `http://localhost:2020/test-upload.html` (jika menggunakan docker)
+
+**Steps:**
+1. Buka browser dan akses URL di atas
 2. Login dengan username & password (atau masukkan token manual)
 3. Pilih file gambar
 4. Klik "Upload Image"
 5. Lihat hasil upload dan URL yang dihasilkan
 
+**Note:** Port 2020 adalah port yang dikonfigurasi di docker-compose.yml untuk Apache server.
+
 ### Test via Postman/cURL
 
 ```bash
-curl -X POST https://api.example.com/api/v1/upload-profile-image \
+# Production Server
+curl -X POST http://103.236.140.19:2020/api/v1/upload-profile-image \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -F "image=@/path/to/image.jpg"
+
+# Local Development (jika menggunakan docker)
+curl -X POST http://localhost:2020/api/v1/upload-profile-image \
   -H "Authorization: Bearer YOUR_JWT_TOKEN" \
   -F "image=@/path/to/image.jpg"
 ```
