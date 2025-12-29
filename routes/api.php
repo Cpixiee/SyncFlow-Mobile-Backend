@@ -22,6 +22,7 @@ Route::prefix('v1')->group(function () {
         Route::post('/refresh', [AuthController::class, 'refresh']);
         Route::get('/me', [AuthController::class, 'me']);
         Route::post('/change-password', [AuthController::class, 'changePassword']);
+        Route::post('/upload-profile-image', [AuthController::class, 'uploadProfileImage']);
         Route::put('/update-user', [AuthController::class, 'updateUser']);
         
         // Admin/Superadmin user management

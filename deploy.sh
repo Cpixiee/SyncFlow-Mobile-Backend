@@ -151,15 +151,19 @@ echo -e "${YELLOW}🚀 Optimizing for production...${NC}"
 run_on_server "docker exec $CONTAINER_NAME php artisan config:cache"
 run_on_server "docker exec $CONTAINER_NAME php artisan route:cache"
 
-# Step 10: Fix permissions
+# Step 10: Create storage link
+echo -e "${YELLOW}🔗 Creating storage link...${NC}"
+run_on_server "docker exec $CONTAINER_NAME php artisan storage:link"
+
+# Step 11: Fix permissions
 echo -e "${YELLOW}🧰 Fixing permissions...${NC}"
 run_on_server "docker exec $CONTAINER_NAME chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache"
 
-# Step 11: Restart container
+# Step 12: Restart container
 echo -e "${YELLOW}🔄 Restarting container...${NC}"
 run_on_server "docker restart $CONTAINER_NAME"
 
-# Step 12: Health check
+# Step 13: Health check
 echo -e "${YELLOW}🏥 Performing health check...${NC}"
 sleep 5
 if curl -f -s "http://$SERVER_IP:2020/api/v1/login" > /dev/null; then
@@ -168,11 +172,11 @@ else
     echo -e "${YELLOW}⚠️  API health check failed, but deployment completed${NC}"
 fi
 
-# Step 13: Cleanup SSH connection
+# Step 14: Cleanup SSH connection
 echo -e "${YELLOW}🧹 Cleaning up SSH connection...${NC}"
 cleanup_ssh
 
-# Step 14: Summary
+# Step 15: Summary
 echo ""
 echo -e "${GREEN}🎉 Deployment completed successfully!${NC}"
 echo -e "${BLUE}📊 Deployment Summary:${NC}"

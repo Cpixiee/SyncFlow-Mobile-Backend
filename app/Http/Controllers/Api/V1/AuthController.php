@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Validator;
 use Tymon\JWTAuth\Facades\JWTAuth;
 use Tymon\JWTAuth\Exceptions\JWTException;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Storage;
 
 class AuthController extends Controller
 {
@@ -197,7 +198,7 @@ class AuthController extends Controller
             'username' => 'required|string|unique:login_users,username',
             'password' => 'nullable|string|min:6', // Optional, akan default ke admin#1234
             'role' => 'required|in:operator,admin,superadmin',
-            'photo_url' => 'nullable|string|url',
+            'photo_url' => 'nullable|string', // Accept URL or relative path like /storage/filename.jpg
             'employee_id' => 'required|string|unique:login_users,employee_id',
             'phone' => 'required|string',
             'email' => 'required|email|unique:login_users,email',
@@ -462,6 +463,75 @@ class AuthController extends Controller
     }
 
     /**
+     * Upload profile image.
+     *
+     * @param Request $request
+     * @return JsonResponse
+     */
+    public function uploadProfileImage(Request $request): JsonResponse
+    {
+        try {
+            // Get authenticated user
+            $authUser = JWTAuth::parseToken()->authenticate();
+            
+            if (!$authUser) {
+                return $this->unauthorizedResponse('User not found');
+            }
+
+            // Validation rules
+            $validator = Validator::make($request->all(), [
+                'image' => 'required|image|mimes:jpeg,jpg,png,gif,webp|max:5120', // Max 5MB
+            ]);
+
+            if ($validator->fails()) {
+                return $this->validationErrorResponse(
+                    $validator->errors(),
+                    'Request invalid'
+                );
+            }
+
+            // Delete old image if exists
+            if ($authUser->photo_url) {
+                $oldImagePath = str_replace('/storage/', '', parse_url($authUser->photo_url, PHP_URL_PATH));
+                if ($oldImagePath && Storage::disk('public')->exists($oldImagePath)) {
+                    Storage::disk('public')->delete($oldImagePath);
+                }
+            }
+
+            // Store uploaded file
+            $image = $request->file('image');
+            $filename = time() . '_' . uniqid() . '.' . $image->getClientOriginalExtension();
+            $image->storeAs('', $filename, 'public');
+
+            // Generate URL
+            $photoUrl = '/storage/' . $filename;
+
+            // Update user photo_url
+            $authUser->update(['photo_url' => $photoUrl]);
+
+            // Prepare response data
+            $userData = [
+                'id' => $authUser->id,
+                'username' => $authUser->username,
+                'photo_url' => $photoUrl,
+                'updated_at' => $authUser->updated_at->format('Y-m-d H:i:s'),
+            ];
+
+            return $this->successResponse(
+                $userData,
+                'Profile image uploaded successfully'
+            );
+
+        } catch (\Exception $e) {
+            return $this->errorResponse(
+                'Could not upload profile image: ' . $e->getMessage(),
+                'IMAGE_UPLOAD_ERROR',
+                500
+            );
+        }
+    }
+
+    /**
      * Update user information (only own data).
      *
      * @param Request $request
@@ -488,7 +558,7 @@ class AuthController extends Controller
             // Validation rules
             $validationRules = [
                 'username' => "nullable|string|unique:login_users,username,{$targetUser->id}",
-                'photo_url' => 'nullable|string|url',
+                'photo_url' => 'nullable|string', // Accept URL or relative path like /storage/filename.jpg
                 'phone' => 'nullable|string',
                 'email' => "nullable|email|unique:login_users,email,{$targetUser->id}",
                 // ✅ NEW: Allow user to update their own employee_id (must stay unique)
