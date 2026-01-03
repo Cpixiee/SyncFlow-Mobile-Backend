@@ -1046,6 +1046,7 @@ class ProductMeasurementController extends Controller
                 'before_after_value' => $sample['before_after_value'] ?? null,
                 'qualitative_value' => $sample['qualitative_value'] ?? null,
                 'pre_processing_formula_values' => null,
+                'measurement_time' => $sample['measurement_time'] ?? null, // ✅ Preserve measurement_time
             ];
 
             // Process pre-processing formulas jika ada
@@ -1883,6 +1884,8 @@ class ProductMeasurementController extends Controller
                                         'is_show' => $formula['is_show'] ?? false
                                     ];
                                 }, $measurementPoint['pre_processing_formulas'], $processedFormulas);
+                                
+                                // ✅ measurement_time is already preserved in $sample array from request
                                 
                                 $processedSamples[] = $sample;
                             }
@@ -2788,9 +2791,29 @@ class ProductMeasurementController extends Controller
                 // Evaluate (to rebuild joint_setting_formula_values if needed)
                 $evaluated = $this->evaluateSampleItem($processedSamples, $point, $measurementItemData, $context);
 
+                // ✅ FIX: Preserve measurement_time from original samples when merging
+                $originalSamples = $item['samples'] ?? [];
+                $originalSamplesMap = [];
+                foreach ($originalSamples as $origSample) {
+                    $sampleIndex = $origSample['sample_index'] ?? null;
+                    if ($sampleIndex !== null) {
+                        $originalSamplesMap[$sampleIndex] = $origSample;
+                    }
+                }
+                
+                // Merge processed samples with original measurement_time
+                $mergedSamples = $evaluated['samples'] ?? $processedSamples;
+                foreach ($mergedSamples as &$mergedSample) {
+                    $sampleIndex = $mergedSample['sample_index'] ?? null;
+                    if ($sampleIndex !== null && isset($originalSamplesMap[$sampleIndex]['measurement_time'])) {
+                        $mergedSample['measurement_time'] = $originalSamplesMap[$sampleIndex]['measurement_time'];
+                    }
+                }
+                unset($mergedSample);
+
                 // Merge back into item, keep original created_at/updated_at/status if present
                 $item['variable_values'] = $evaluated['variable_values'] ?? $rebuiltVariables;
-                $item['samples'] = $evaluated['samples'] ?? $processedSamples;
+                $item['samples'] = $mergedSamples;
                 if (isset($evaluated['joint_setting_formula_values'])) {
                     $item['joint_setting_formula_values'] = $evaluated['joint_setting_formula_values'];
                 }
