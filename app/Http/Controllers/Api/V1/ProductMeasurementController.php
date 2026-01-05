@@ -739,6 +739,7 @@ class ProductMeasurementController extends Controller
                 'samples.*.before_after_value.before' => 'required_with:samples.*.before_after_value|numeric',
                 'samples.*.before_after_value.after' => 'required_with:samples.*.before_after_value|numeric',
                 'samples.*.qualitative_value' => 'nullable|boolean',
+                'samples.*.measurement_time' => 'nullable|date', // ✅ FIX: Add validation for measurement_time
             ]);
 
             if ($validator->fails()) {
@@ -1118,7 +1119,7 @@ class ProductMeasurementController extends Controller
                 break;
                 
             case 'SKIP_CHECK':
-                $result['status'] = true;
+                $result['status'] = null; // ✅ FIX: SKIP_CHECK tidak di-evaluate, status harus NULL bukan OK/NG
                 break;
         }
 
@@ -2330,6 +2331,8 @@ class ProductMeasurementController extends Controller
                                     ];
                                 }, $measurementPoint['pre_processing_formulas'], $processedFormulas);
 
+                                // ✅ measurement_time is already preserved in $sample array from request
+                                
                                 $processedSamples[] = $sample;
                             }
 
@@ -3143,9 +3146,15 @@ class ProductMeasurementController extends Controller
                         }
                     }
 
+                    // ✅ FIX: For SKIP_CHECK, status should be NULL (no evaluation performed)
+                    $sampleStatus = null;
+                    if ($evaluationType !== 'SKIP_CHECK') {
+                        $sampleStatus = $isOk ? 'ok' : ($isNg ? 'ng' : null);
+                    }
+
                     $processedSamples[] = [
                         'sample_index' => $sampleIndex,
-                        'status' => $isOk ? 'ok' : ($isNg ? 'ng' : null),
+                        'status' => $sampleStatus,
                         'single_value' => $sample['single_value'] ?? null,
                         'before_after_value' => $sample['before_after_value'] ?? null,
                         'qualitative_value' => $sample['qualitative_value'] ?? null,
