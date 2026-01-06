@@ -1,10 +1,10 @@
-# Use PHP 8.3 with Apache untuk optimasi Debian 11
+# Use PHP 8.3 with Apache untuk optimasi Debian 22.04
 FROM php:8.3-apache
 
 # Set working directory
 WORKDIR /var/www/html
 
-# Install system dependencies untuk Debian 11
+# Install system dependencies untuk Debian 22.04
 RUN apt-get update && apt-get install -y \
     git \
     curl \

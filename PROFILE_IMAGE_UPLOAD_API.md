@@ -371,7 +371,7 @@ const handleImageUpload = async (event) => {
 ### Manual Test via Web
 
 **URL untuk akses test page:**
-- **Production Server:** `http://103.236.140.19:2020/test-upload.html`
+- **Production Server:** `http://139.59.231.237:2020/test-upload.html`
 - **Local Development:** `http://localhost:2020/test-upload.html` (jika menggunakan docker)
 
 **Steps:**
@@ -387,7 +387,7 @@ const handleImageUpload = async (event) => {
 
 ```bash
 # Production Server
-curl -X POST http://103.236.140.19:2020/api/v1/upload-profile-image \
+curl -X POST http://139.59.231.237:2020/api/v1/upload-profile-image \
   -H "Authorization: Bearer YOUR_JWT_TOKEN" \
   -F "image=@/path/to/image.jpg"
 

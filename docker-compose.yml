@@ -11,7 +11,7 @@ services:
     environment:
       - APP_ENV=production
       - APP_DEBUG=false
-      - APP_URL=http://103.236.140.19:2020
+      - APP_URL=http://139.59.231.237:2020
       - DB_CONNECTION=mysql
       - DB_HOST=syncflow-db
       - DB_PORT=3306
@@ -72,7 +72,7 @@ services:
       PMA_PASSWORD: RootSyncFlow2024#
       MYSQL_ROOT_PASSWORD: RootSyncFlow2024#
       PMA_ARBITRARY: 1
-      PMA_ABSOLUTE_URI: http://103.236.140.19:8081
+      PMA_ABSOLUTE_URI: http://139.59.231.237:8081
     depends_on:
       syncflow-db:
         condition: service_healthy
