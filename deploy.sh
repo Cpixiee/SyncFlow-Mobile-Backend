@@ -101,59 +101,59 @@ run_on_server "cd $SERVER_PATH && git pull origin main"
 
 # Step 4: Install/Update dependencies
 echo -e "${YELLOW}📦 Installing/Updating Composer dependencies...${NC}"
-run_on_server "cd $SERVER_PATH && docker exec $CONTAINER_NAME composer install --no-dev --optimize-autoloader"
+run_on_server "docker exec -w /var/www/html $CONTAINER_NAME composer install --no-dev --optimize-autoloader"
 
 # Step 5: Ensure nxp/math-executor is installed
 echo -e "${YELLOW}➕ Ensuring nxp/math-executor is installed...${NC}"
-run_on_server "cd $SERVER_PATH && docker exec $CONTAINER_NAME composer require nxp/math-executor --no-interaction --no-progress || true"
+run_on_server "docker exec -w /var/www/html $CONTAINER_NAME composer require nxp/math-executor --no-interaction --no-progress || true"
 
 # Step 6: Clear composer cache & autoload
 echo -e "${YELLOW}🧹 Regenerating Composer autoload...${NC}"
-run_on_server "docker exec $CONTAINER_NAME composer dump-autoload --optimize"
+run_on_server "docker exec -w /var/www/html $CONTAINER_NAME composer dump-autoload --optimize"
 
 # Step 7: Run Laravel maintenance commands
 echo -e "${YELLOW}⚙️  Running Laravel optimization commands...${NC}"
-run_on_server "docker exec $CONTAINER_NAME php artisan config:clear"
-run_on_server "docker exec $CONTAINER_NAME php artisan cache:clear"
-run_on_server "docker exec $CONTAINER_NAME php artisan route:clear"
-run_on_server "docker exec $CONTAINER_NAME php artisan package:discover --ansi"
+run_on_server "docker exec -w /var/www/html $CONTAINER_NAME php artisan config:clear"
+run_on_server "docker exec -w /var/www/html $CONTAINER_NAME php artisan cache:clear"
+run_on_server "docker exec -w /var/www/html $CONTAINER_NAME php artisan route:clear"
+run_on_server "docker exec -w /var/www/html $CONTAINER_NAME php artisan package:discover --ansi"
 
 # Step 8: Run migrations & seeders
 echo -e "${YELLOW}🗃️  Running database migrations...${NC}"
-run_on_server "docker exec $CONTAINER_NAME php artisan migrate --force"
+run_on_server "docker exec -w /var/www/html $CONTAINER_NAME php artisan migrate --force"
 
 echo -e "${YELLOW}🌱 Running database seeders...${NC}"
 echo -e "${BLUE}  → Seeding Quarters...${NC}"
-run_on_server "docker exec $CONTAINER_NAME php artisan db:seed --class=QuarterSeeder --force"
+run_on_server "docker exec -w /var/www/html $CONTAINER_NAME php artisan db:seed --class=QuarterSeeder --force"
 
 echo -e "${BLUE}  → Seeding Product Categories...${NC}"
-run_on_server "docker exec $CONTAINER_NAME php artisan db:seed --class=ProductCategorySeeder --force"
+run_on_server "docker exec -w /var/www/html $CONTAINER_NAME php artisan db:seed --class=ProductCategorySeeder --force"
 
 echo -e "${BLUE}  → Seeding Measurement Instruments...${NC}"
-run_on_server "docker exec $CONTAINER_NAME php artisan db:seed --class=MeasurementInstrumentSeeder --force"
+run_on_server "docker exec -w /var/www/html $CONTAINER_NAME php artisan db:seed --class=MeasurementInstrumentSeeder --force"
 
 echo -e "${BLUE}  → Seeding Tools...${NC}"
-run_on_server "docker exec $CONTAINER_NAME php artisan db:seed --class=ToolSeeder --force"
+run_on_server "docker exec -w /var/www/html $CONTAINER_NAME php artisan db:seed --class=ToolSeeder --force"
 
 echo -e "${BLUE}  → Seeding Super Admin User...${NC}"
-run_on_server "docker exec $CONTAINER_NAME php artisan db:seed --class=SuperAdminSeeder --force"
+run_on_server "docker exec -w /var/www/html $CONTAINER_NAME php artisan db:seed --class=SuperAdminSeeder --force"
 
 echo -e "${BLUE}  → Seeding Login Users...${NC}"
-run_on_server "docker exec $CONTAINER_NAME php artisan db:seed --class=LoginUserSeeder --force"
+run_on_server "docker exec -w /var/www/html $CONTAINER_NAME php artisan db:seed --class=LoginUserSeeder --force"
 
 # Step 8b: Activate Quarter (IMPORTANT!)
 echo -e "${YELLOW}📅 Activating Quarter...${NC}"
 # Activate Q4 2024 as default active quarter
-run_on_server "docker exec $CONTAINER_NAME php artisan tinker --execute=\"\\\$quarter = App\\\\Models\\\\Quarter::where('year', 2024)->where('name', 'Q4')->first(); if(\\\$quarter) { \\\$quarter->setAsActive(); echo 'Q4 2024 activated'; } else { echo 'Quarter not found'; }\""
+run_on_server "docker exec -w /var/www/html $CONTAINER_NAME php artisan tinker --execute=\"\\\$quarter = App\\\\Models\\\\Quarter::where('year', 2024)->where('name', 'Q4')->first(); if(\\\$quarter) { \\\$quarter->setAsActive(); echo 'Q4 2024 activated'; } else { echo 'Quarter not found'; }\""
 
 # Step 9: Optimize Laravel for production
 echo -e "${YELLOW}🚀 Optimizing for production...${NC}"
-run_on_server "docker exec $CONTAINER_NAME php artisan config:cache"
-run_on_server "docker exec $CONTAINER_NAME php artisan route:cache"
+run_on_server "docker exec -w /var/www/html $CONTAINER_NAME php artisan config:cache"
+run_on_server "docker exec -w /var/www/html $CONTAINER_NAME php artisan route:cache"
 
 # Step 10: Create storage link
 echo -e "${YELLOW}🔗 Creating storage link...${NC}"
-run_on_server "docker exec $CONTAINER_NAME php artisan storage:link"
+run_on_server "docker exec -w /var/www/html $CONTAINER_NAME php artisan storage:link"
 
 # Step 11: Fix permissions
 echo -e "${YELLOW}🧰 Fixing permissions...${NC}"
