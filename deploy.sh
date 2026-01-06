@@ -87,7 +87,7 @@ echo -e "${GREEN}✅ Server connection established (password only needed once)${
 echo -e "${YELLOW}🔍 Checking Docker container...${NC}"
 if ! check_container; then
     echo -e "${YELLOW}⚠️  Container not running. Starting container...${NC}"
-    run_on_server "cd $SERVER_PATH && docker-compose up -d"
+    run_on_server "cd $SERVER_PATH && docker compose up -d"
     sleep 10
     if ! check_container; then
         echo -e "${RED}❌ Failed to start container${NC}"

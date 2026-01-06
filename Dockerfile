@@ -1,10 +1,10 @@
-# Use PHP 8.3 with Apache untuk optimasi Debian 22.04
+# Use PHP 8.3 with Apache untuk optimasi Ubuntu 22.04 / Debian 12
 FROM php:8.3-apache
 
 # Set working directory
 WORKDIR /var/www/html
 
-# Install system dependencies untuk Debian 22.04
+# Install system dependencies untuk Ubuntu 22.04 / Debian 12
 RUN apt-get update && apt-get install -y \
     git \
     curl \
@@ -15,8 +15,7 @@ RUN apt-get update && apt-get install -y \
     unzip \
     libzip-dev \
     libfreetype6-dev \
-    libjpeg62-turbo-dev \
-    libmcrypt-dev \
+    libjpeg-dev \
     libicu-dev \
     default-mysql-client \
     nano \
