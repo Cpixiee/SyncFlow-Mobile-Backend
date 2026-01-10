@@ -700,13 +700,21 @@ class ProductMeasurementController extends Controller
                         // User input manual - validate samples required
                         break;
                     case 'INSTRUMENT':
-                        // Auto dari IoT/alat ukur - samples bisa kosong karena akan diambil otomatis
-                        return $this->successResponse([
-                            'status' => null,
-                            'message' => 'Measurement akan diambil otomatis dari alat ukur IoT',
-                            'source_type' => 'INSTRUMENT',
-                            'samples' => []
-                        ], 'Waiting for instrument data');
+                        // ✅ FIX: INSTRUMENT bisa menerima input manual (sama seperti MANUAL)
+                        // Jika ada samples yang dikirim dari frontend, proses seperti MANUAL (lanjut ke validasi)
+                        // Jika tidak ada samples, baru return "Waiting for instrument data" (untuk future IoT integration)
+                        $hasSamples = !empty($request->samples) && is_array($request->samples) && count($request->samples) > 0;
+                        if (!$hasSamples) {
+                            // Tidak ada samples - mungkin dari IoT device nanti atau belum di-input
+                            return $this->successResponse([
+                                'status' => null,
+                                'message' => 'Measurement akan diambil otomatis dari alat ukur IoT',
+                                'source_type' => 'INSTRUMENT',
+                                'samples' => []
+                            ], 'Waiting for instrument data');
+                        }
+                        // Ada samples yang dikirim - proses seperti MANUAL (lanjut ke validasi dan processing di bawah)
+                        break;
                     case 'DERIVED':
                         // Auto dari measurement item lain - samples akan dihitung otomatis
                         $derivedFromId = $measurementPoint['setup']['source_derived_name_id'] ?? null;
