@@ -335,10 +335,25 @@ class ReportController extends Controller
                 'sheet_names' => $sheetNames,
             ]);
 
+            // Check if 'raw_data' sheet exists
+            $hasRawDataSheet = in_array('raw_data', $sheetNames);
+
             return $this->successResponse([
                 'master_file_id' => $masterFile->id,
-                'filename' => $originalFilename,
-                'sheets' => $sheetNames,
+                'product_measurement_id' => $measurement->id,
+                'measurement_id' => $measurement->measurement_id,
+                'batch_number' => $batchNumber,
+                'original_filename' => $originalFilename,
+                'stored_filename' => $storedFilename,
+                'file_path' => $filePath,
+                'sheet_names' => $sheetNames,
+                'total_sheets' => count($sheetNames),
+                'has_raw_data_sheet' => $hasRawDataSheet,
+                'uploaded_by' => $user->username,
+                'uploaded_at' => $masterFile->created_at->format('Y-m-d H:i:s'),
+                'note' => $hasRawDataSheet 
+                    ? 'Data will be injected to existing "raw_data" sheet' 
+                    : 'A new "raw_data" sheet will be created',
             ], 'Master file uploaded successfully');
         } catch (\Exception $e) {
             return $this->errorResponse('Error uploading master file: ' . $e->getMessage(), 'UPLOAD_ERROR', 500);

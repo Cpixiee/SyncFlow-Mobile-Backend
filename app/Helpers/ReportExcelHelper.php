@@ -301,9 +301,24 @@ class ReportExcelHelper
     {
         try {
             $reader = \PhpOffice\PhpSpreadsheet\IOFactory::createReader('Xlsx');
+            $reader->setReadDataOnly(false);
             $spreadsheet = $reader->load($filePath);
-            return $spreadsheet->getSheetNames();
+            
+            $sheetNames = [];
+            foreach ($spreadsheet->getWorksheetIterator() as $index => $worksheet) {
+                $title = $worksheet->getTitle();
+                // Filter out empty or invalid sheet names
+                if (!empty($title) && strlen($title) < 100) {
+                    $sheetNames[] = $title;
+                } else {
+                    // Fallback to Sheet{index}
+                    $sheetNames[] = 'Sheet' . ($index + 1);
+                }
+            }
+            
+            return $sheetNames;
         } catch (\Exception $e) {
+            \Log::error('Error getting sheet names: ' . $e->getMessage());
             return [];
         }
     }
