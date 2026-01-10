@@ -244,6 +244,7 @@ class ProductMeasurementController extends Controller
                         'product_category_id' => $product->productCategory->id,
                         'product_category_name' => $product->productCategory->name,
                         'product_name' => $product->product_name,
+                        'product_spec_name' => $product->product_spec_name,
                         'ref_spec_number' => $product->ref_spec_number,
                         'nom_size_vo' => $product->nom_size_vo,
                         'article_code' => $product->article_code,
@@ -2846,6 +2847,11 @@ class ProductMeasurementController extends Controller
                 'sample_status' => $measurement->getSampleStatus()->value,
                 'overall_result' => $measurement->overall_result,
                 'measurement_results' => $measurementResults,
+                'product' => [
+                    'id' => $measurement->product->product_id,
+                    'product_name' => $measurement->product->product_name,
+                    'product_spec_name' => $measurement->product->product_spec_name,
+                ],
                 'measured_by' => $measurement->measuredBy ? [
                     'username' => $measurement->measuredBy->username,
                     'employee_id' => $measurement->measuredBy->employee_id,
