@@ -168,6 +168,24 @@ Route::prefix('v1')->group(function () {
             Route::delete('/all-read', [\App\Http\Controllers\Api\V1\NotificationController::class, 'deleteAllRead']);
             Route::delete('/{id}', [\App\Http\Controllers\Api\V1\NotificationController::class, 'destroy']);
         });
+
+        // Reports - available for all authenticated users
+        Route::prefix('reports')->group(function () {
+            // Filter endpoints
+            Route::get('/filters/quarters', [\App\Http\Controllers\Api\V1\ReportController::class, 'getQuarters']);
+            Route::get('/filters/products', [\App\Http\Controllers\Api\V1\ReportController::class, 'getProducts']);
+            Route::get('/filters/batch-numbers', [\App\Http\Controllers\Api\V1\ReportController::class, 'getBatchNumbers']);
+            
+            // Report data endpoint
+            Route::get('/data', [\App\Http\Controllers\Api\V1\ReportController::class, 'getReportData']);
+            
+            // Upload master file (all authenticated users can upload)
+            Route::post('/upload-master', [\App\Http\Controllers\Api\V1\ReportController::class, 'uploadMasterFile']);
+            
+            // Download endpoints
+            Route::get('/download/excel', [\App\Http\Controllers\Api\V1\ReportController::class, 'downloadExcel']);
+            Route::get('/download/pdf', [\App\Http\Controllers\Api\V1\ReportController::class, 'downloadPdf']);
+        });
     });
 });
 

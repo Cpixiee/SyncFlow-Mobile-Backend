@@ -103,9 +103,12 @@ run_on_server "cd $SERVER_PATH && git pull origin main"
 echo -e "${YELLOW}📦 Installing/Updating Composer dependencies...${NC}"
 run_on_server "docker exec -w /var/www/html $CONTAINER_NAME composer install --no-dev --optimize-autoloader"
 
-# Step 5: Ensure nxp/math-executor is installed
-echo -e "${YELLOW}➕ Ensuring nxp/math-executor is installed...${NC}"
+# Step 5: Ensure required packages are installed
+echo -e "${YELLOW}➕ Ensuring required packages are installed...${NC}"
 run_on_server "docker exec -w /var/www/html $CONTAINER_NAME composer require nxp/math-executor --no-interaction --no-progress || true"
+run_on_server "docker exec -w /var/www/html $CONTAINER_NAME composer require phpoffice/phpspreadsheet --no-interaction --no-progress || true"
+run_on_server "docker exec -w /var/www/html $CONTAINER_NAME composer require dompdf/dompdf --no-interaction --no-progress || true"
+run_on_server "docker exec -w /var/www/html $CONTAINER_NAME composer require barryvdh/laravel-dompdf --no-interaction --no-progress || true"
 
 # Step 6: Clear composer cache & autoload
 echo -e "${YELLOW}🧹 Regenerating Composer autoload...${NC}"
@@ -151,13 +154,17 @@ echo -e "${YELLOW}🚀 Optimizing for production...${NC}"
 run_on_server "docker exec -w /var/www/html $CONTAINER_NAME php artisan config:cache"
 run_on_server "docker exec -w /var/www/html $CONTAINER_NAME php artisan route:cache"
 
-# Step 10: Create storage link
+# Step 10: Create storage link & directories
 echo -e "${YELLOW}🔗 Creating storage link...${NC}"
 run_on_server "docker exec -w /var/www/html $CONTAINER_NAME php artisan storage:link"
+
+echo -e "${YELLOW}📁 Creating report storage directories...${NC}"
+run_on_server "docker exec -w /var/www/html $CONTAINER_NAME mkdir -p storage/app/reports/master_files"
 
 # Step 11: Fix permissions
 echo -e "${YELLOW}🧰 Fixing permissions...${NC}"
 run_on_server "docker exec $CONTAINER_NAME chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache"
+run_on_server "docker exec $CONTAINER_NAME chmod -R 775 /var/www/html/storage/app/reports"
 
 # Step 12: Restart container
 echo -e "${YELLOW}🔄 Restarting container...${NC}"
