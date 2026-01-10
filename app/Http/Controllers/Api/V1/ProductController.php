@@ -47,7 +47,7 @@ class ProductController extends Controller
                 'measurement_points.*.setup.source' => 'nullable|in:MANUAL,DERIVED,TOOL,INSTRUMENT',
                 'measurement_points.*.setup.source_derived_name_id' => 'required_if:measurement_points.*.setup.source,DERIVED|nullable|string',
                 'measurement_points.*.setup.source_tool_model' => 'required_if:measurement_points.*.setup.source,TOOL|nullable|string',
-                'measurement_points.*.setup.source_instrument_id' => 'required_if:measurement_points.*.setup.source,INSTRUMENT|nullable|integer|exists:measurement_instruments,id',
+                'measurement_points.*.setup.source_instrument_id' => 'required_if:measurement_points.*.setup.source,INSTRUMENT|nullable',
                 'measurement_points.*.setup.type' => 'nullable|in:SINGLE,BEFORE_AFTER',
 
                 // Variables
@@ -109,6 +109,9 @@ class ProductController extends Controller
 
             // Auto-generate name_id if not provided
             $measurementPoints = $this->autoGenerateNameIds($measurementPoints);
+
+            // ✅ FIX: Normalize source_instrument_id (convert name/model to ID if string provided)
+            $measurementPoints = $this->normalizeInstrumentIds($measurementPoints);
 
             // Validate and process formulas
             $formulaValidationErrors = $this->validateAndProcessFormulas($measurementPoints);
@@ -554,17 +557,17 @@ class ProductController extends Controller
             $measurementPoints = $request->input('measurement_points');
             $measurementGroups = $request->input('measurement_groups', []);
 
-            // Validate measurement_points (reuse existing validation logic)
-            $measurementPointsValidation = $this->validateMeasurementPoints($measurementPoints);
-            if (!empty($measurementPointsValidation)) {
-                return $this->errorResponse('Measurement points validation failed', 'MEASUREMENT_VALIDATION_ERROR', 400, $measurementPointsValidation);
-            }
-
             // Auto-generate name_id if not provided
             $measurementPoints = $this->autoGenerateNameIds($measurementPoints);
 
             // ✅ FIX: Normalize source_instrument_id (convert name/model to ID if string provided)
             $measurementPoints = $this->normalizeInstrumentIds($measurementPoints);
+
+            // Validate measurement_points (reuse existing validation logic)
+            $measurementPointsValidation = $this->validateMeasurementPoints($measurementPoints);
+            if (!empty($measurementPointsValidation)) {
+                return $this->errorResponse('Measurement points validation failed', 'MEASUREMENT_VALIDATION_ERROR', 400, $measurementPointsValidation);
+            }
 
             // Validate and process formulas
             $formulaValidationErrors = $this->validateAndProcessFormulas($measurementPoints);
@@ -715,7 +718,7 @@ class ProductController extends Controller
                 'measurement_points.*.setup.source' => 'nullable|in:MANUAL,DERIVED,TOOL,INSTRUMENT',
                 'measurement_points.*.setup.source_derived_name_id' => 'required_if:measurement_points.*.setup.source,DERIVED|nullable|string',
                 'measurement_points.*.setup.source_tool_model' => 'required_if:measurement_points.*.setup.source,TOOL|nullable|string',
-                'measurement_points.*.setup.source_instrument_id' => 'required_if:measurement_points.*.setup.source,INSTRUMENT|nullable|integer|exists:measurement_instruments,id',
+                'measurement_points.*.setup.source_instrument_id' => 'required_if:measurement_points.*.setup.source,INSTRUMENT|nullable',
                 'measurement_points.*.setup.type' => 'nullable|in:SINGLE,BEFORE_AFTER',
                 'measurement_points.*.variables' => 'nullable|array',
                 'measurement_points.*.variables.*.type' => 'required_with:measurement_points.*.variables|in:FIXED,MANUAL,FORMULA',
