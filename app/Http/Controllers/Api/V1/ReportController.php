@@ -129,10 +129,16 @@ class ReportController extends Controller
                 ->whereBetween('due_date', [$quarterRange['start'], $quarterRange['end']])
                 ->whereNotNull('due_date')
                 ->whereNotNull('batch_number')
-                ->distinct()
-                ->pluck('batch_number')
-                ->filter()
-                ->values();
+                ->orderBy('created_at', 'desc')
+                ->get()
+                ->map(function ($measurement) {
+                    return [
+                        'batch_number' => $measurement->batch_number,
+                        'measurement_id' => $measurement->measurement_id,
+                        'created_at' => $measurement->created_at->format('Y-m-d H:i:s'),
+                        'product_status' => $measurement->product_status ?? 'PENDING',
+                    ];
+                });
 
             return $this->successResponse($batchNumbers, 'Batch numbers retrieved successfully');
         } catch (\Exception $e) {
