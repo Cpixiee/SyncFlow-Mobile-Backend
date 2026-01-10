@@ -31,6 +31,9 @@ class DatabaseSeeder extends Seeder
         // Seed tools
         $this->call(ToolSeeder::class);
         
+        // Seed master products
+        $this->call(MasterProductSeeder::class);
+        
         // Seed issues (optional, for testing)
         if (app()->environment(['local', 'testing'])) {
             $this->call(IssueSeeder::class);

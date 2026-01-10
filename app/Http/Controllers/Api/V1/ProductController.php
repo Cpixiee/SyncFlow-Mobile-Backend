@@ -7,6 +7,7 @@ use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Models\Quarter;
 use App\Models\MasterProduct;
+use App\Models\MeasurementInstrument;
 use App\Traits\ApiResponseTrait;
 use App\Helpers\FormulaHelper;
 use Illuminate\Http\Request;
@@ -43,9 +44,10 @@ class ProductController extends Controller
                 'measurement_points.*.setup.nature' => 'required|in:QUALITATIVE,QUANTITATIVE',
 
                 // source and type are optional for QUALITATIVE, but validated conditionally below
-                'measurement_points.*.setup.source' => 'nullable|in:MANUAL,DERIVED,TOOL',
+                'measurement_points.*.setup.source' => 'nullable|in:MANUAL,DERIVED,TOOL,INSTRUMENT',
                 'measurement_points.*.setup.source_derived_name_id' => 'required_if:measurement_points.*.setup.source,DERIVED|nullable|string',
                 'measurement_points.*.setup.source_tool_model' => 'required_if:measurement_points.*.setup.source,TOOL|nullable|string',
+                'measurement_points.*.setup.source_instrument_id' => 'required_if:measurement_points.*.setup.source,INSTRUMENT|nullable|integer|exists:measurement_instruments,id',
                 'measurement_points.*.setup.type' => 'nullable|in:SINGLE,BEFORE_AFTER',
 
                 // Variables
@@ -561,6 +563,9 @@ class ProductController extends Controller
             // Auto-generate name_id if not provided
             $measurementPoints = $this->autoGenerateNameIds($measurementPoints);
 
+            // ✅ FIX: Normalize source_instrument_id (convert name/model to ID if string provided)
+            $measurementPoints = $this->normalizeInstrumentIds($measurementPoints);
+
             // Validate and process formulas
             $formulaValidationErrors = $this->validateAndProcessFormulas($measurementPoints);
             if (!empty($formulaValidationErrors)) {
@@ -707,9 +712,10 @@ class ProductController extends Controller
                 'measurement_points.*.setup.name_id' => 'required_with:measurement_points|string|regex:/^[a-zA-Z_]+$/',
                 'measurement_points.*.setup.sample_amount' => 'required_with:measurement_points|integer|min:0', // ✅ Allow 0 for auto-calculate from formula
                 'measurement_points.*.setup.nature' => 'required_with:measurement_points|in:QUALITATIVE,QUANTITATIVE',
-                'measurement_points.*.setup.source' => 'nullable|in:MANUAL,DERIVED,TOOL',
+                'measurement_points.*.setup.source' => 'nullable|in:MANUAL,DERIVED,TOOL,INSTRUMENT',
                 'measurement_points.*.setup.source_derived_name_id' => 'required_if:measurement_points.*.setup.source,DERIVED|nullable|string',
                 'measurement_points.*.setup.source_tool_model' => 'required_if:measurement_points.*.setup.source,TOOL|nullable|string',
+                'measurement_points.*.setup.source_instrument_id' => 'required_if:measurement_points.*.setup.source,INSTRUMENT|nullable|integer|exists:measurement_instruments,id',
                 'measurement_points.*.setup.type' => 'nullable|in:SINGLE,BEFORE_AFTER',
                 'measurement_points.*.variables' => 'nullable|array',
                 'measurement_points.*.variables.*.type' => 'required_with:measurement_points.*.variables|in:FIXED,MANUAL,FORMULA',
@@ -787,6 +793,9 @@ class ProductController extends Controller
                 
                 // Auto-generate name_id if not provided
                 $measurementPoints = $this->autoGenerateNameIds($measurementPoints);
+
+                // ✅ FIX: Normalize source_instrument_id (convert name/model to ID if string provided)
+                $measurementPoints = $this->normalizeInstrumentIds($measurementPoints);
 
                 // Validate and process formulas
                 $formulaValidationErrors = $this->validateAndProcessFormulas($measurementPoints);
@@ -1474,6 +1483,32 @@ class ProductController extends Controller
                 // This would require checking against existing measurement points
             }
 
+            // Validate INSTRUMENT source
+            if (isset($setup['source']) && $setup['source'] === 'INSTRUMENT') {
+                if (!isset($setup['source_instrument_id']) || empty($setup['source_instrument_id'])) {
+                    $errors["measurement_point_{$pointIndex}"] = 'source_instrument_id is required when source is INSTRUMENT';
+                } else {
+                    // Validate that instrument exists (by ID, name, or model)
+                    $instrumentId = $setup['source_instrument_id'];
+                    $instrument = null;
+                    
+                    if (is_numeric($instrumentId)) {
+                        $instrument = MeasurementInstrument::find($instrumentId);
+                    } else {
+                        $instrument = MeasurementInstrument::where('name', $instrumentId)
+                            ->orWhere('model', $instrumentId)
+                            ->first();
+                    }
+                    
+                    if (!$instrument) {
+                        $errors["measurement_point_{$pointIndex}"] = "Measurement instrument dengan ID/name/model '{$instrumentId}' tidak ditemukan";
+                    } else {
+                        // Store the actual ID for consistency
+                        $setup['source_instrument_id'] = $instrument->id;
+                    }
+                }
+            }
+
             // Validate variables based on type
             foreach ($variables as $varIndex => $variable) {
                 $varType = $variable['type'] ?? '';
@@ -1636,5 +1671,34 @@ class ProductController extends Controller
         }
 
         return $errors;
+    }
+
+    /**
+     * Normalize source_instrument_id: convert name/model string to ID if needed
+     * ✅ FIX: Handle case where frontend sends instrument name/model instead of ID
+     */
+    private function normalizeInstrumentIds(array $measurementPoints): array
+    {
+        foreach ($measurementPoints as &$point) {
+            if (isset($point['setup']['source']) && $point['setup']['source'] === 'INSTRUMENT') {
+                $instrumentId = $point['setup']['source_instrument_id'] ?? null;
+                
+                if ($instrumentId && !is_numeric($instrumentId)) {
+                    // Try to find instrument by name or model
+                    $instrument = MeasurementInstrument::where('name', $instrumentId)
+                        ->orWhere('model', $instrumentId)
+                        ->first();
+                    
+                    if ($instrument) {
+                        $point['setup']['source_instrument_id'] = $instrument->id;
+                    } else {
+                        // If not found, keep original value and let validation handle it
+                        // This will be caught in validateMeasurementPoints
+                    }
+                }
+            }
+        }
+
+        return $measurementPoints;
     }
 }

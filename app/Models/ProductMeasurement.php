@@ -160,7 +160,7 @@ class ProductMeasurement extends Model
                 break;
                 
             case 'SKIP_CHECK':
-                $result['status'] = true; // Always OK for SKIP_CHECK
+                $result['status'] = null; // ✅ FIX: SKIP_CHECK tidak di-evaluate, status harus NULL bukan OK/NG
                 break;
         }
 
