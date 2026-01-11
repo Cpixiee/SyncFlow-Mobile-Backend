@@ -43,7 +43,7 @@ class ProductController extends Controller
                 // Measurement Points
                 'measurement_points' => 'required|array|min:1',
                 'measurement_points.*.setup.name' => 'required|string',
-                'measurement_points.*.setup.name_id' => 'nullable|string|regex:/^[a-z][a-z0-9_]*$/',
+                'measurement_points.*.setup.name_id' => 'nullable|string', // ✅ Format validation moved to enhanced validation
                 'measurement_points.*.setup.sample_amount' => 'required|integer|min:0', // ✅ Allow 0 for auto-calculate from formula
                 'measurement_points.*.setup.nature' => 'required|in:QUALITATIVE,QUANTITATIVE',
 
@@ -54,17 +54,17 @@ class ProductController extends Controller
                 'measurement_points.*.setup.source_instrument_id' => 'required_if:measurement_points.*.setup.source,INSTRUMENT|nullable',
                 'measurement_points.*.setup.type' => 'nullable|in:SINGLE,BEFORE_AFTER',
 
-                // Variables
+                // Variables - ✅ Format validation moved to enhanced validation
                 'measurement_points.*.variables' => 'nullable|array',
                 'measurement_points.*.variables.*.type' => 'required_with:measurement_points.*.variables|in:FIXED,MANUAL,FORMULA',
-                'measurement_points.*.variables.*.name' => 'required_with:measurement_points.*.variables|string|regex:/^[a-z][a-z0-9_]*$/',
+                'measurement_points.*.variables.*.name' => 'required_with:measurement_points.*.variables|string', // ✅ Removed regex, handled in enhanced validation
                 'measurement_points.*.variables.*.value' => 'required_if:measurement_points.*.variables.*.type,FIXED|nullable|numeric',
                 'measurement_points.*.variables.*.formula' => 'required_if:measurement_points.*.variables.*.type,FORMULA|nullable|string',
                 'measurement_points.*.variables.*.is_show' => 'required_with:measurement_points.*.variables|boolean',
 
-                // Pre-processing formulas
+                // Pre-processing formulas - ✅ Format validation moved to enhanced validation
                 'measurement_points.*.pre_processing_formulas' => 'nullable|array',
-                'measurement_points.*.pre_processing_formulas.*.name' => 'required_with:measurement_points.*.pre_processing_formulas|string|regex:/^[a-z][a-z0-9_]*$/',
+                'measurement_points.*.pre_processing_formulas.*.name' => 'required_with:measurement_points.*.pre_processing_formulas|string', // ✅ Removed regex, handled in enhanced validation
                 'measurement_points.*.pre_processing_formulas.*.formula' => 'required_with:measurement_points.*.pre_processing_formulas|string',
                 'measurement_points.*.pre_processing_formulas.*.is_show' => 'required_with:measurement_points.*.pre_processing_formulas|boolean',
 
@@ -88,42 +88,180 @@ class ProductController extends Controller
                 'measurement_groups.*.order' => 'required_with:measurement_groups|integer',
             ]);
 
-            if ($validator->fails()) {
-                return $this->validationErrorResponse($validator->errors());
-            }
-
+            // ✅ NEW: Enhanced validation runs FIRST (before Laravel validator)
+            // This ensures user-friendly error messages are returned
             $basicInfo = $request->input('basic_info');
             $measurementPoints = $request->input('measurement_points');
             $measurementGroups = $request->input('measurement_groups', []);
 
-            // Validate product_category_id exists and get category details
-            $category = ProductCategory::find($basicInfo['product_category_id']);
-            if (!$category) {
-                return $this->errorResponse('Product category tidak ditemukan', 'CATEGORY_NOT_FOUND', 400);
-            }
-
-            // Validate product_name is valid for the category
-            if (!in_array($basicInfo['product_name'], $category->products)) {
+            // Basic validation - check if required fields exist
+            if (empty($basicInfo) || empty($measurementPoints)) {
                 return $this->errorResponse(
-                    'Product name "' . $basicInfo['product_name'] . '" tidak valid untuk category "' . $category->name . '"',
-                    'INVALID_PRODUCT_NAME',
+                    'Request invalid: basic_info dan measurement_points wajib diisi',
+                    'VALIDATION_ERROR',
                     400
                 );
             }
 
-            // Auto-generate name_id if not provided
+            // Validate product_category_id exists and get category details
+            $category = ProductCategory::find($basicInfo['product_category_id'] ?? null);
+            if (!$category) {
+                $basicInfoErrors = [];
+                if (!isset($basicInfo['product_category_id'])) {
+                    $basicInfoErrors[] = ValidationErrorHelper::createBasicInfoError(
+                        BasicInfoErrorEnum::REQUIRED,
+                        'product_category_id',
+                        'Product category ID wajib diisi'
+                    );
+                } else {
+                    $basicInfoErrors[] = ValidationErrorHelper::createBasicInfoError(
+                        BasicInfoErrorEnum::INVALID_CATEGORY,
+                        'product_category_id',
+                        'Product category tidak ditemukan'
+                    );
+                }
+                $errorResponse = ValidationErrorHelper::formatErrorResponse(
+                    'PRODUCT_VALIDATION_ERROR',
+                    $basicInfoErrors,
+                    []
+                );
+                return $this->errorResponse(
+                    'Validation failed',
+                    'PRODUCT_VALIDATION_ERROR',
+                    400,
+                    $errorResponse
+                );
+            }
+
+            // Auto-generate name_id if not provided (before enhanced validation)
             $measurementPoints = $this->autoGenerateNameIds($measurementPoints);
 
             // ✅ FIX: Normalize source_instrument_id (convert name/model to ID if string provided)
             $measurementPoints = $this->normalizeInstrumentIds($measurementPoints);
 
-            // ✅ NEW: Enhanced validation with structured error messages
+            // ✅ NEW: Enhanced validation with structured error messages (runs FIRST)
             $enhancedValidation = $this->validateProductEnhanced($basicInfo, $measurementPoints, $category);
             if (!empty($enhancedValidation['basic_info']) || !empty($enhancedValidation['measurement_points'])) {
                 $errorResponse = ValidationErrorHelper::formatErrorResponse(
                     'PRODUCT_VALIDATION_ERROR',
                     $enhancedValidation['basic_info'],
                     $enhancedValidation['measurement_points']
+                );
+                return $this->errorResponse(
+                    'Validation failed',
+                    'PRODUCT_VALIDATION_ERROR',
+                    400,
+                    $errorResponse
+                );
+            }
+
+            // ✅ Run Laravel validator for basic type checking (after enhanced validation passes)
+            // This catches any remaining type/format issues that enhanced validation might miss
+            $validator = Validator::make($request->all(), [
+                // Basic Info
+                'basic_info.product_category_id' => 'required|integer|exists:product_categories,id',
+                'basic_info.product_name' => 'required|string',
+                'basic_info.ref_spec_number' => 'nullable|string',
+                'basic_info.nom_size_vo' => 'nullable|string',
+                'basic_info.article_code' => 'nullable|string',
+                'basic_info.no_document' => 'nullable|string',
+                'basic_info.no_doc_reference' => 'nullable|string',
+                'basic_info.color' => 'nullable|string|max:50',
+                'basic_info.size' => 'nullable|string',
+
+                // Measurement Points - basic type checking only
+                'measurement_points' => 'required|array|min:1',
+                'measurement_points.*.setup.name' => 'required|string',
+                'measurement_points.*.setup.name_id' => 'nullable|string',
+                'measurement_points.*.setup.sample_amount' => 'required|integer|min:0',
+                'measurement_points.*.setup.nature' => 'required|in:QUALITATIVE,QUANTITATIVE',
+                'measurement_points.*.setup.source' => 'nullable|in:MANUAL,DERIVED,TOOL,INSTRUMENT',
+                'measurement_points.*.setup.source_derived_name_id' => 'required_if:measurement_points.*.setup.source,DERIVED|nullable|string',
+                'measurement_points.*.setup.source_tool_model' => 'required_if:measurement_points.*.setup.source,TOOL|nullable|string',
+                'measurement_points.*.setup.source_instrument_id' => 'required_if:measurement_points.*.setup.source,INSTRUMENT|nullable',
+                'measurement_points.*.setup.type' => 'nullable|in:SINGLE,BEFORE_AFTER',
+                'measurement_points.*.variables' => 'nullable|array',
+                'measurement_points.*.variables.*.type' => 'required_with:measurement_points.*.variables|in:FIXED,MANUAL,FORMULA',
+                'measurement_points.*.variables.*.name' => 'required_with:measurement_points.*.variables|string',
+                'measurement_points.*.variables.*.value' => 'required_if:measurement_points.*.variables.*.type,FIXED|nullable|numeric',
+                'measurement_points.*.variables.*.formula' => 'required_if:measurement_points.*.variables.*.type,FORMULA|nullable|string',
+                'measurement_points.*.variables.*.is_show' => 'required_with:measurement_points.*.variables|boolean',
+                'measurement_points.*.pre_processing_formulas' => 'nullable|array',
+                'measurement_points.*.pre_processing_formulas.*.name' => 'required_with:measurement_points.*.pre_processing_formulas|string',
+                'measurement_points.*.pre_processing_formulas.*.formula' => 'required_with:measurement_points.*.pre_processing_formulas|string',
+                'measurement_points.*.pre_processing_formulas.*.is_show' => 'required_with:measurement_points.*.pre_processing_formulas|boolean',
+                'measurement_points.*.evaluation_type' => 'required|in:PER_SAMPLE,JOINT,SKIP_CHECK',
+                'measurement_points.*.evaluation_setting' => 'required_unless:measurement_points.*.evaluation_type,SKIP_CHECK|array|nullable',
+                'measurement_points.*.rule_evaluation_setting' => 'nullable|array',
+                'measurement_points.*.rule_evaluation_setting.rule' => 'required_with:measurement_points.*.rule_evaluation_setting|in:MIN,MAX,BETWEEN',
+                'measurement_points.*.rule_evaluation_setting.unit' => 'required_with:measurement_points.*.rule_evaluation_setting|string',
+                'measurement_points.*.rule_evaluation_setting.value' => 'required_with:measurement_points.*.rule_evaluation_setting|numeric',
+                'measurement_points.*.rule_evaluation_setting.tolerance_minus' => 'required_if:measurement_points.*.rule_evaluation_setting.rule,BETWEEN|nullable|numeric',
+                'measurement_points.*.rule_evaluation_setting.tolerance_plus' => 'required_if:measurement_points.*.rule_evaluation_setting.rule,BETWEEN|nullable|numeric',
+                'measurement_groups' => 'nullable|array',
+                'measurement_groups.*.group_name' => 'nullable|string',
+                'measurement_groups.*.measurement_items' => 'required_with:measurement_groups|array',
+                'measurement_groups.*.order' => 'required_with:measurement_groups|integer',
+            ]);
+
+            if ($validator->fails()) {
+                // If Laravel validator still fails, convert to enhanced format
+                $errors = $validator->errors();
+                $basicInfoErrors = [];
+                $measurementPointErrors = [];
+
+                foreach ($errors->keys() as $key) {
+                    if (str_starts_with($key, 'basic_info.')) {
+                        $field = str_replace('basic_info.', '', $key);
+                        $message = $errors->first($key);
+                        $basicInfoErrors[] = ValidationErrorHelper::createBasicInfoError(
+                            BasicInfoErrorEnum::INVALID_FORMAT,
+                            $field,
+                            $message
+                        );
+                    } elseif (str_starts_with($key, 'measurement_points.')) {
+                        // Extract measurement point index and field
+                        preg_match('/measurement_points\.(\d+)\.(.+)/', $key, $matches);
+                        if (count($matches) === 3) {
+                            $pointIndex = (int)$matches[1];
+                            $fieldPath = $matches[2];
+                            
+                            // Get measurement point name if available
+                            $measurementPoint = $measurementPoints[$pointIndex] ?? null;
+                            $setup = $measurementPoint['setup'] ?? [];
+                            $pointName = $setup['name'] ?? "Measurement Point #{$pointIndex}";
+                            $pointNameId = $setup['name_id'] ?? null;
+
+                            // Determine section and entity name
+                            $section = MeasurementPointSectionEnum::SETUP;
+                            $entityName = 'setup';
+                            
+                            if (str_contains($fieldPath, 'variables')) {
+                                $section = MeasurementPointSectionEnum::VARIABLE;
+                                preg_match('/variables\.(\d+)\.(.+)/', $fieldPath, $varMatches);
+                                $entityName = $varMatches[2] ?? 'variable';
+                            } elseif (str_contains($fieldPath, 'pre_processing_formulas')) {
+                                $section = MeasurementPointSectionEnum::PRE_PROCESSING_FORMULA;
+                                preg_match('/pre_processing_formulas\.(\d+)\.(.+)/', $fieldPath, $formulaMatches);
+                                $entityName = $formulaMatches[2] ?? 'pre_processing_formula';
+                            }
+
+                            $message = $errors->first($key);
+                            $measurementPointErrors[] = ValidationErrorHelper::createMeasurementPointError(
+                                ['name_id' => $pointNameId, 'name' => $pointName],
+                                $section,
+                                $entityName,
+                                MeasurementPointErrorEnum::INVALID_FORMAT,
+                                "{$pointName} - {$message}"
+                            );
+                        }
+                    }
+                }
+
+                $errorResponse = ValidationErrorHelper::formatErrorResponse(
+                    'PRODUCT_VALIDATION_ERROR',
+                    $basicInfoErrors,
+                    $measurementPointErrors
                 );
                 return $this->errorResponse(
                     'Validation failed',
