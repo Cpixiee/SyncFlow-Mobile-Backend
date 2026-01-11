@@ -159,12 +159,14 @@ echo -e "${YELLOW}🔗 Creating storage link...${NC}"
 run_on_server "docker exec -w /var/www/html $CONTAINER_NAME php artisan storage:link"
 
 echo -e "${YELLOW}📁 Creating report storage directories...${NC}"
-run_on_server "docker exec -w /var/www/html $CONTAINER_NAME mkdir -p storage/app/reports/master_files"
+run_on_server "docker exec -w /var/www/html $CONTAINER_NAME mkdir -p storage/app/private/reports/master_files"
+run_on_server "docker exec -w /var/www/html $CONTAINER_NAME mkdir -p storage/app/temp"
 
 # Step 11: Fix permissions
 echo -e "${YELLOW}🧰 Fixing permissions...${NC}"
 run_on_server "docker exec $CONTAINER_NAME chown -R www-data:www-data /var/www/html/storage /var/www/html/bootstrap/cache"
-run_on_server "docker exec $CONTAINER_NAME chmod -R 775 /var/www/html/storage/app/reports"
+run_on_server "docker exec $CONTAINER_NAME chmod -R 775 /var/www/html/storage/app/private/reports"
+run_on_server "docker exec $CONTAINER_NAME chmod -R 775 /var/www/html/storage/app/temp"
 
 # Step 12: Restart container
 echo -e "${YELLOW}🔄 Restarting container...${NC}"

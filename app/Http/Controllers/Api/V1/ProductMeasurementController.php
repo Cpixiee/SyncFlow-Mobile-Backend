@@ -73,6 +73,7 @@ class ProductMeasurementController extends Controller
                         'product_category_id' => $product->product_category_id,
                         'product_category_name' => $product->productCategory->name,
                         'product_name' => $product->product_name,
+                        'product_spec_name' => $product->product_spec_name, // ✅ Added product_spec_name
                         'ref_spec_number' => $product->ref_spec_number,
                         'nom_size_vo' => $product->nom_size_vo,
                         'article_code' => $product->article_code,

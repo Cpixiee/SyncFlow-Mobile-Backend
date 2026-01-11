@@ -315,14 +315,19 @@ class ReportController extends Controller
                 $existingMaster->delete();
             }
 
-            // Store file
+            // Store file - using 'local' disk which maps to storage/app/private
             $file = $request->file('file');
             $originalFilename = $file->getClientOriginalName();
             $storedFilename = 'master_' . time() . '_' . $file->hashName();
+            
+            // Ensure directory exists
+            Storage::disk('local')->makeDirectory('reports/master_files');
+            
+            // Store file (will be saved in storage/app/private/reports/master_files/)
             $filePath = $file->storeAs('reports/master_files', $storedFilename, 'local');
 
             // Get sheet names from Excel file
-            $fullPath = Storage::disk('local')->path($filePath);
+            $fullPath = storage_path('app/' . $filePath);
             $sheetNames = ReportExcelHelper::getSheetNames($fullPath);
 
             // Save to database
@@ -420,7 +425,7 @@ class ReportController extends Controller
 
             if ($masterFile && Storage::disk('local')->exists($masterFile->file_path)) {
                 // Merge data ke master file
-                $masterFilePath = Storage::disk('local')->path($masterFile->file_path);
+                $masterFilePath = storage_path('app/' . $masterFile->file_path);
                 $spreadsheet = ReportExcelHelper::mergeDataToMasterFile($masterFilePath, $dataRows, 'raw_data');
                 $filename = pathinfo($masterFile->original_filename, PATHINFO_FILENAME) . '.xlsx';
             } else {
@@ -501,7 +506,7 @@ class ReportController extends Controller
 
             if ($masterFile && Storage::disk('local')->exists($masterFile->file_path)) {
                 // Convert each sheet to PDF
-                $masterFilePath = Storage::disk('local')->path($masterFile->file_path);
+                $masterFilePath = storage_path('app/' . $masterFile->file_path);
                 
                 // Merge data to raw_data sheet first
                 $spreadsheet = ReportExcelHelper::mergeDataToMasterFile($masterFilePath, $dataRows, 'raw_data');

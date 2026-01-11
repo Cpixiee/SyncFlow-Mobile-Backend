@@ -10,6 +10,10 @@ use App\Models\MasterProduct;
 use App\Models\MeasurementInstrument;
 use App\Traits\ApiResponseTrait;
 use App\Helpers\FormulaHelper;
+use App\Helpers\ValidationErrorHelper;
+use App\Enums\BasicInfoErrorEnum;
+use App\Enums\MeasurementPointErrorEnum;
+use App\Enums\MeasurementPointSectionEnum;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 
@@ -113,44 +117,40 @@ class ProductController extends Controller
             // ✅ FIX: Normalize source_instrument_id (convert name/model to ID if string provided)
             $measurementPoints = $this->normalizeInstrumentIds($measurementPoints);
 
+            // ✅ NEW: Enhanced validation with structured error messages
+            $enhancedValidation = $this->validateProductEnhanced($basicInfo, $measurementPoints, $category);
+            if (!empty($enhancedValidation['basic_info']) || !empty($enhancedValidation['measurement_points'])) {
+                $errorResponse = ValidationErrorHelper::formatErrorResponse(
+                    'PRODUCT_VALIDATION_ERROR',
+                    $enhancedValidation['basic_info'],
+                    $enhancedValidation['measurement_points']
+                );
+                return $this->errorResponse(
+                    'Validation failed',
+                    'PRODUCT_VALIDATION_ERROR',
+                    400,
+                    $errorResponse
+                );
+            }
+
             // Validate and process formulas
-            $formulaValidationErrors = $this->validateAndProcessFormulas($measurementPoints);
+            $formulaValidationErrors = $this->validateAndProcessFormulasEnhanced($measurementPoints);
             if (!empty($formulaValidationErrors)) {
-                return $this->errorResponse('Formula validation failed', 'FORMULA_VALIDATION_ERROR', 400, $formulaValidationErrors);
+                $errorResponse = ValidationErrorHelper::formatErrorResponse(
+                    'FORMULA_VALIDATION_ERROR',
+                    [],
+                    $formulaValidationErrors
+                );
+                return $this->errorResponse(
+                    'Formula validation failed',
+                    'FORMULA_VALIDATION_ERROR',
+                    400,
+                    $errorResponse
+                );
             }
 
             // Process measurement groups if provided
             $processedMeasurementPoints = $this->processMeasurementGrouping($measurementPoints, $measurementGroups ?? []);
-
-            // Additional validation for measurement points (includes nature-specific validations)
-            $validationErrors = $this->validateMeasurementPoints($measurementPoints);
-            if (!empty($validationErrors)) {
-                return $this->errorResponse('Measurement points validation failed', 'MEASUREMENT_VALIDATION_ERROR', 400, $validationErrors);
-            }
-
-            // Validate source and type are required for QUANTITATIVE
-            $quantitativeErrors = $this->validateQuantitativeRequirements($measurementPoints);
-            if (!empty($quantitativeErrors)) {
-                return $this->errorResponse('QUANTITATIVE measurement validation failed', 'QUANTITATIVE_VALIDATION_ERROR', 400, $quantitativeErrors);
-            }
-
-            // ✅ NEW: Validate QUALITATIVE requirements
-            $qualitativeErrors = $this->validateQualitativeRequirements($measurementPoints);
-            if (!empty($qualitativeErrors)) {
-                return $this->errorResponse('QUALITATIVE measurement validation failed', 'QUALITATIVE_VALIDATION_ERROR', 400, $qualitativeErrors);
-            }
-
-            // Validate type-specific rules (BEFORE_AFTER wajib pre-processing, evaluation rules, etc)
-            $typeSpecificErrors = $this->validateTypeSpecificRules($measurementPoints);
-            if (!empty($typeSpecificErrors)) {
-                return $this->errorResponse('Type-specific validation failed', 'TYPE_VALIDATION_ERROR', 400, $typeSpecificErrors);
-            }
-
-            // Validate name uniqueness across variables, pre_processing_formulas, and joint_setting formulas
-            $nameValidationErrors = $this->validateNameUniqueness($measurementPoints);
-            if (!empty($nameValidationErrors)) {
-                return $this->errorResponse('Name validation failed', 'NAME_UNIQUENESS_ERROR', 400, $nameValidationErrors);
-            }
 
             // Get active quarter (optional - quarter is only for measurement results, not product creation)
             $activeQuarter = Quarter::getActiveQuarter();
@@ -1703,5 +1703,451 @@ class ProductController extends Controller
         }
 
         return $measurementPoints;
+    }
+
+    /**
+     * ✅ NEW: Enhanced validation with structured error messages
+     */
+    private function validateProductEnhanced(array $basicInfo, array $measurementPoints, $category): array
+    {
+        $basicInfoErrors = [];
+        $measurementPointErrors = [];
+
+        // Validate basic info
+        if (!isset($basicInfo['product_name']) || empty($basicInfo['product_name'])) {
+            $basicInfoErrors[] = ValidationErrorHelper::createBasicInfoError(
+                BasicInfoErrorEnum::REQUIRED,
+                'product_name',
+                'Nama produk wajib diisi'
+            );
+        } elseif (!in_array($basicInfo['product_name'], $category->products)) {
+            $basicInfoErrors[] = ValidationErrorHelper::createBasicInfoError(
+                BasicInfoErrorEnum::INVALID_PRODUCT_NAME,
+                'product_name',
+                "Nama produk \"{$basicInfo['product_name']}\" tidak valid untuk kategori \"{$category->name}\". " .
+                "Nama yang tersedia: " . implode(', ', $category->products)
+            );
+        }
+
+        if (isset($basicInfo['color']) && strlen($basicInfo['color']) > 50) {
+            $basicInfoErrors[] = ValidationErrorHelper::createBasicInfoError(
+                BasicInfoErrorEnum::TOO_LONG,
+                'color',
+                'Warna terlalu panjang (maksimal 50 karakter)'
+            );
+        }
+
+        // Validate measurement points
+        foreach ($measurementPoints as $index => $point) {
+            $setup = $point['setup'] ?? [];
+            $name = $setup['name'] ?? '';
+            $nameId = $setup['name_id'] ?? '';
+
+            // Validate setup.name
+            if (empty($name)) {
+                $measurementPointErrors[] = ValidationErrorHelper::createMeasurementPointError(
+                    ['name_id' => $nameId, 'name' => $name],
+                    MeasurementPointSectionEnum::SETUP,
+                    'name',
+                    MeasurementPointErrorEnum::REQUIRED,
+                    "Nama measurement item wajib diisi"
+                );
+            }
+
+            // Validate setup.name_id format
+            if (!empty($nameId)) {
+                $nameError = ValidationErrorHelper::validateNameFormat($nameId);
+                if ($nameError) {
+                    $errorMessage = ValidationErrorHelper::generateInvalidNameMessage($nameId, $nameError);
+                    $code = match($nameError) {
+                        'space' => MeasurementPointErrorEnum::CONTAINS_SPACE,
+                        'uppercase' => MeasurementPointErrorEnum::UPPERCASE_NOT_ALLOWED,
+                        'special_character' => MeasurementPointErrorEnum::SPECIAL_CHARACTER,
+                        default => MeasurementPointErrorEnum::INVALID_NAME,
+                    };
+                    $measurementPointErrors[] = ValidationErrorHelper::createMeasurementPointError(
+                        ['name_id' => $nameId, 'name' => $name],
+                        MeasurementPointSectionEnum::SETUP,
+                        'name_id',
+                        $code,
+                        "Measurement item \"{$name}\" - {$errorMessage}"
+                    );
+                }
+            }
+
+            // Validate variables
+            if (isset($point['variables']) && is_array($point['variables'])) {
+                foreach ($point['variables'] as $varIndex => $variable) {
+                    $varName = $variable['name'] ?? '';
+                    
+                    if (!empty($varName)) {
+                        $varNameError = ValidationErrorHelper::validateNameFormat($varName);
+                        if ($varNameError) {
+                            $errorMessage = ValidationErrorHelper::generateVariableErrorMessage($varName, $varNameError);
+                            $measurementPointErrors[] = ValidationErrorHelper::createMeasurementPointError(
+                                ['name_id' => $nameId, 'name' => $name],
+                                MeasurementPointSectionEnum::VARIABLE,
+                                $varName,
+                                MeasurementPointErrorEnum::INVALID_NAME,
+                                $errorMessage
+                            );
+                        }
+                    }
+
+                    // Validate FIXED variable value
+                    if (($variable['type'] ?? '') === 'FIXED') {
+                        if (!isset($variable['value']) || !is_numeric($variable['value'])) {
+                            $measurementPointErrors[] = ValidationErrorHelper::createMeasurementPointError(
+                                ['name_id' => $nameId, 'name' => $name],
+                                MeasurementPointSectionEnum::VARIABLE,
+                                $varName,
+                                MeasurementPointErrorEnum::REQUIRED,
+                                "Variable \"{$varName}\" bertipe FIXED harus memiliki nilai numerik"
+                            );
+                        }
+                    }
+                }
+            }
+
+            // Validate pre-processing formulas
+            if (isset($point['pre_processing_formulas']) && is_array($point['pre_processing_formulas'])) {
+                foreach ($point['pre_processing_formulas'] as $formulaIndex => $formula) {
+                    $formulaName = $formula['name'] ?? '';
+                    
+                    if (!empty($formulaName)) {
+                        $formulaNameError = ValidationErrorHelper::validateNameFormat($formulaName);
+                        if ($formulaNameError) {
+                            $errorMessage = ValidationErrorHelper::generateInvalidNameMessage($formulaName, $formulaNameError);
+                            $measurementPointErrors[] = ValidationErrorHelper::createMeasurementPointError(
+                                ['name_id' => $nameId, 'name' => $name],
+                                MeasurementPointSectionEnum::PRE_PROCESSING_FORMULA,
+                                $formulaName,
+                                MeasurementPointErrorEnum::INVALID_NAME,
+                                "Pre-processing formula \"{$formulaName}\" - {$errorMessage}"
+                            );
+                        }
+                    }
+                }
+            }
+
+            // Validate evaluation type
+            $evaluationType = $point['evaluation_type'] ?? '';
+            if (empty($evaluationType)) {
+                $measurementPointErrors[] = ValidationErrorHelper::createMeasurementPointError(
+                    ['name_id' => $nameId, 'name' => $name],
+                    MeasurementPointSectionEnum::EVALUATION,
+                    'evaluation_type',
+                    MeasurementPointErrorEnum::REQUIRED,
+                    "Measurement item \"{$name}\" harus memiliki tipe evaluasi (PER_SAMPLE, JOINT, atau SKIP_CHECK)"
+                );
+            }
+
+            // Validate rule evaluation
+            if (isset($point['rule_evaluation_setting'])) {
+                $ruleEval = $point['rule_evaluation_setting'];
+                
+                if (empty($ruleEval['rule'])) {
+                    $measurementPointErrors[] = ValidationErrorHelper::createMeasurementPointError(
+                        ['name_id' => $nameId, 'name' => $name],
+                        MeasurementPointSectionEnum::RULE_EVALUATION,
+                        'rule',
+                        MeasurementPointErrorEnum::REQUIRED,
+                        "Measurement item \"{$name}\" harus memiliki rule evaluasi (MIN, MAX, atau BETWEEN)"
+                    );
+                }
+
+                if (!isset($ruleEval['value']) || !is_numeric($ruleEval['value'])) {
+                    $measurementPointErrors[] = ValidationErrorHelper::createMeasurementPointError(
+                        ['name_id' => $nameId, 'name' => $name],
+                        MeasurementPointSectionEnum::RULE_EVALUATION,
+                        'value',
+                        MeasurementPointErrorEnum::REQUIRED,
+                        "Measurement item \"{$name}\" harus memiliki nilai rule yang valid"
+                    );
+                }
+
+                if (($ruleEval['rule'] ?? '') === 'BETWEEN') {
+                    if (!isset($ruleEval['tolerance_minus']) || !is_numeric($ruleEval['tolerance_minus'])) {
+                        $measurementPointErrors[] = ValidationErrorHelper::createMeasurementPointError(
+                            ['name_id' => $nameId, 'name' => $name],
+                            MeasurementPointSectionEnum::RULE_EVALUATION,
+                            'tolerance_minus',
+                            MeasurementPointErrorEnum::INVALID_TOLERANCE,
+                            "Measurement item \"{$name}\" dengan rule BETWEEN harus memiliki tolerance_minus yang valid"
+                        );
+                    }
+                    if (!isset($ruleEval['tolerance_plus']) || !is_numeric($ruleEval['tolerance_plus'])) {
+                        $measurementPointErrors[] = ValidationErrorHelper::createMeasurementPointError(
+                            ['name_id' => $nameId, 'name' => $name],
+                            MeasurementPointSectionEnum::RULE_EVALUATION,
+                            'tolerance_plus',
+                            MeasurementPointErrorEnum::INVALID_TOLERANCE,
+                            "Measurement item \"{$name}\" dengan rule BETWEEN harus memiliki tolerance_plus yang valid"
+                        );
+                    }
+                }
+            }
+        }
+
+        return [
+            'basic_info' => $basicInfoErrors,
+            'measurement_points' => $measurementPointErrors,
+        ];
+    }
+
+    /**
+     * ✅ NEW: Enhanced formula validation with structured error messages
+     */
+    private function validateAndProcessFormulasEnhanced(array &$measurementPoints): array
+    {
+        $errors = [];
+
+        foreach ($measurementPoints as $pointIndex => &$point) {
+            $setup = $point['setup'] ?? [];
+            $name = $setup['name'] ?? '';
+            $nameId = $setup['name_id'] ?? '';
+
+            // Get available measurement IDs (only those defined BEFORE current point)
+            $availableIds = [];
+            for ($i = 0; $i < $pointIndex; $i++) {
+                if (isset($measurementPoints[$i]['setup']['name_id'])) {
+                    $availableIds[] = $measurementPoints[$i]['setup']['name_id'];
+                }
+            }
+
+            // Validate variables formulas
+            if (isset($point['variables']) && is_array($point['variables'])) {
+                foreach ($point['variables'] as $varIndex => &$variable) {
+                    if (($variable['type'] ?? '') === 'FORMULA' && isset($variable['formula'])) {
+                        $currentPointContext = [
+                            'type' => $setup['type'] ?? null,
+                            'variables' => array_slice($point['variables'], 0, $varIndex),
+                            'pre_processing_formulas' => []
+                        ];
+
+                        $formulaErrors = $this->validateSingleFormulaEnhanced(
+                            $variable['formula'],
+                            $availableIds,
+                            $currentPointContext,
+                            ['name_id' => $nameId, 'name' => $name],
+                            MeasurementPointSectionEnum::VARIABLE,
+                            $variable['name'] ?? 'unnamed'
+                        );
+
+                        if (!empty($formulaErrors)) {
+                            $errors = array_merge($errors, $formulaErrors);
+                        } else {
+                            // Normalize formula
+                            try {
+                                FormulaHelper::validateFormulaFormat($variable['formula']);
+                                $normalized = FormulaHelper::normalizeFunctionNames($variable['formula']);
+                                $variable['formula'] = $normalized;
+                            } catch (\InvalidArgumentException $e) {
+                                $errors[] = ValidationErrorHelper::createMeasurementPointError(
+                                    ['name_id' => $nameId, 'name' => $name],
+                                    MeasurementPointSectionEnum::VARIABLE,
+                                    $variable['name'] ?? 'unnamed',
+                                    MeasurementPointErrorEnum::INVALID_FORMULA,
+                                    "Variable \"{$variable['name']}\" - " . $e->getMessage()
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Validate pre-processing formulas
+            if (isset($point['pre_processing_formulas']) && is_array($point['pre_processing_formulas'])) {
+                foreach ($point['pre_processing_formulas'] as $formulaIndex => &$formula) {
+                    if (isset($formula['formula'])) {
+                        $preProcessingAvailableIds = array_merge($availableIds, [$nameId]);
+                        $currentPointContext = [
+                            'type' => $setup['type'] ?? null,
+                            'variables' => $point['variables'] ?? [],
+                            'pre_processing_formulas' => array_slice($point['pre_processing_formulas'], 0, $formulaIndex)
+                        ];
+
+                        $formulaErrors = $this->validateSingleFormulaEnhanced(
+                            $formula['formula'],
+                            $preProcessingAvailableIds,
+                            $currentPointContext,
+                            ['name_id' => $nameId, 'name' => $name],
+                            MeasurementPointSectionEnum::PRE_PROCESSING_FORMULA,
+                            $formula['name'] ?? 'unnamed'
+                        );
+
+                        if (!empty($formulaErrors)) {
+                            $errors = array_merge($errors, $formulaErrors);
+                        } else {
+                            // Normalize formula
+                            try {
+                                FormulaHelper::validateFormulaFormat($formula['formula']);
+                                $normalized = FormulaHelper::normalizeFunctionNames($formula['formula']);
+                                $formula['formula'] = $normalized;
+                            } catch (\InvalidArgumentException $e) {
+                                $errors[] = ValidationErrorHelper::createMeasurementPointError(
+                                    ['name_id' => $nameId, 'name' => $name],
+                                    MeasurementPointSectionEnum::PRE_PROCESSING_FORMULA,
+                                    $formula['name'] ?? 'unnamed',
+                                    MeasurementPointErrorEnum::INVALID_FORMULA,
+                                    "Pre-processing formula \"{$formula['name']}\" - " . $e->getMessage()
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Validate joint setting formulas
+            if (isset($point['evaluation_setting']['joint_setting']['formulas']) && is_array($point['evaluation_setting']['joint_setting']['formulas'])) {
+                foreach ($point['evaluation_setting']['joint_setting']['formulas'] as $formulaIndex => &$formula) {
+                    if (isset($formula['formula'])) {
+                        $jointAvailableIds = array_merge($availableIds, [$nameId]);
+                        $currentPointContext = [
+                            'type' => $setup['type'] ?? null,
+                            'variables' => $point['variables'] ?? [],
+                            'pre_processing_formulas' => $point['pre_processing_formulas'] ?? [],
+                            'joint_formulas' => array_slice($point['evaluation_setting']['joint_setting']['formulas'], 0, $formulaIndex)
+                        ];
+
+                        $formulaErrors = $this->validateSingleFormulaEnhanced(
+                            $formula['formula'],
+                            $jointAvailableIds,
+                            $currentPointContext,
+                            ['name_id' => $nameId, 'name' => $name],
+                            MeasurementPointSectionEnum::JOINT_FORMULA,
+                            $formula['name'] ?? 'unnamed'
+                        );
+
+                        if (!empty($formulaErrors)) {
+                            $errors = array_merge($errors, $formulaErrors);
+                        } else {
+                            // Normalize formula
+                            try {
+                                FormulaHelper::validateFormulaFormat($formula['formula']);
+                                $normalized = FormulaHelper::normalizeFunctionNames($formula['formula']);
+                                $formula['formula'] = $normalized;
+                            } catch (\InvalidArgumentException $e) {
+                                $errors[] = ValidationErrorHelper::createMeasurementPointError(
+                                    ['name_id' => $nameId, 'name' => $name],
+                                    MeasurementPointSectionEnum::JOINT_FORMULA,
+                                    $formula['name'] ?? 'unnamed',
+                                    MeasurementPointErrorEnum::INVALID_FORMULA,
+                                    "Joint formula \"{$formula['name']}\" - " . $e->getMessage()
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        return $errors;
+    }
+
+    /**
+     * ✅ NEW: Validate single formula with enhanced error messages
+     */
+    private function validateSingleFormulaEnhanced(
+        string $formula,
+        array $availableIds,
+        ?array $currentPointContext,
+        array $measurementItem,
+        MeasurementPointSectionEnum $section,
+        string $entityName
+    ): array {
+        $errors = [];
+
+        // Validate format (must start with =)
+        try {
+            FormulaHelper::validateFormulaFormat($formula);
+        } catch (\InvalidArgumentException $e) {
+            $errors[] = ValidationErrorHelper::createMeasurementPointError(
+                $measurementItem,
+                $section,
+                $entityName,
+                MeasurementPointErrorEnum::INVALID_FORMULA,
+                "{$section->value} \"{$entityName}\" tidak valid: Formula harus diawali dengan tanda '=' (contoh: =avg(thickness))"
+            );
+            return $errors;
+        }
+
+        // Get all referenced identifiers from formula
+        $referencedItems = FormulaHelper::extractMeasurementReferences($formula);
+
+        // Build list of valid local identifiers
+        $validLocalIdentifiers = [];
+
+        if ($currentPointContext) {
+            $type = $currentPointContext['type'] ?? null;
+
+            // Add raw data variables based on type
+            if ($type === 'SINGLE') {
+                $validLocalIdentifiers[] = 'single_value';
+            } elseif ($type === 'BEFORE_AFTER') {
+                $validLocalIdentifiers[] = 'before';
+                $validLocalIdentifiers[] = 'after';
+            }
+
+            // Add variables
+            if (isset($currentPointContext['variables']) && is_array($currentPointContext['variables'])) {
+                foreach ($currentPointContext['variables'] as $variable) {
+                    if (isset($variable['name'])) {
+                        $validLocalIdentifiers[] = $variable['name'];
+                    }
+                }
+            }
+
+            // Add previous pre-processing formula names
+            if (isset($currentPointContext['pre_processing_formulas']) && is_array($currentPointContext['pre_processing_formulas'])) {
+                foreach ($currentPointContext['pre_processing_formulas'] as $prevFormula) {
+                    if (isset($prevFormula['name'])) {
+                        $validLocalIdentifiers[] = $prevFormula['name'];
+                    }
+                }
+            }
+
+            // Add previous joint formula names
+            if (isset($currentPointContext['joint_formulas']) && is_array($currentPointContext['joint_formulas'])) {
+                foreach ($currentPointContext['joint_formulas'] as $prevJointFormula) {
+                    if (isset($prevJointFormula['name'])) {
+                        $validLocalIdentifiers[] = $prevJointFormula['name'];
+                    }
+                }
+            }
+        }
+
+        // Check for missing dependencies
+        $missingDependencies = [];
+        foreach ($referencedItems as $itemId) {
+            // Skip if it's a valid local identifier
+            if (in_array($itemId, $validLocalIdentifiers)) {
+                continue;
+            }
+
+            // Check if it's an available measurement item
+            if (!in_array($itemId, $availableIds)) {
+                $missingDependencies[] = $itemId;
+            }
+        }
+
+        if (!empty($missingDependencies)) {
+            foreach ($missingDependencies as $missingItem) {
+                $message = ValidationErrorHelper::generateInvalidFormulaMessage(
+                    $entityName,
+                    $formula,
+                    $missingItem
+                );
+                $errors[] = ValidationErrorHelper::createMeasurementPointError(
+                    $measurementItem,
+                    $section,
+                    $entityName,
+                    MeasurementPointErrorEnum::MISSING_DEPENDENCY,
+                    $message
+                );
+            }
+        }
+
+        return $errors;
     }
 }
