@@ -2025,6 +2025,59 @@ class ProductController extends Controller
                     }
                 }
             }
+
+            // ✅ NEW: Validate DERIVED source consistency
+            if (($setup['source'] ?? '') === 'DERIVED') {
+                $derivedFromId = $setup['source_derived_name_id'] ?? null;
+                if ($derivedFromId) {
+                    // Find source measurement point
+                    $sourcePoint = null;
+                    foreach ($measurementPoints as $prevIndex => $prevPoint) {
+                        if ($prevIndex < $index && isset($prevPoint['setup']['name_id']) && $prevPoint['setup']['name_id'] === $derivedFromId) {
+                            $sourcePoint = $prevPoint;
+                            break;
+                        }
+                    }
+
+                    if (!$sourcePoint) {
+                        $measurementPointErrors[] = ValidationErrorHelper::createMeasurementPointError(
+                            ['name_id' => $nameId, 'name' => $name],
+                            MeasurementPointSectionEnum::SETUP,
+                            'source_derived_name_id',
+                            MeasurementPointErrorEnum::NOT_FOUND,
+                            "Measurement item \"{$name}\" - Source measurement item \"{$derivedFromId}\" tidak ditemukan. Pastikan measurement item tersebut didefinisikan sebelumnya."
+                        );
+                    } else {
+                        $sourceSetup = $sourcePoint['setup'] ?? [];
+                        $sourceSampleAmount = $sourceSetup['sample_amount'] ?? null;
+                        $sourceType = $sourceSetup['type'] ?? null;
+                        $currentSampleAmount = $setup['sample_amount'] ?? null;
+                        $currentType = $setup['type'] ?? null;
+
+                        // Validate sample_amount match
+                        if ($sourceSampleAmount !== null && $currentSampleAmount !== null && $sourceSampleAmount !== $currentSampleAmount) {
+                            $measurementPointErrors[] = ValidationErrorHelper::createMeasurementPointError(
+                                ['name_id' => $nameId, 'name' => $name],
+                                MeasurementPointSectionEnum::SETUP,
+                                'sample_amount',
+                                MeasurementPointErrorEnum::LOGICAL_CONFLICT,
+                                "Measurement item \"{$name}\" - sample_amount ({$currentSampleAmount}) harus sama dengan source measurement item \"{$derivedFromId}\" ({$sourceSampleAmount})"
+                            );
+                        }
+
+                        // Validate type match
+                        if ($sourceType !== null && $currentType !== null && $sourceType !== $currentType) {
+                            $measurementPointErrors[] = ValidationErrorHelper::createMeasurementPointError(
+                                ['name_id' => $nameId, 'name' => $name],
+                                MeasurementPointSectionEnum::SETUP,
+                                'type',
+                                MeasurementPointErrorEnum::LOGICAL_CONFLICT,
+                                "Measurement item \"{$name}\" - type ({$currentType}) harus sama dengan source measurement item \"{$derivedFromId}\" ({$sourceType})"
+                            );
+                        }
+                    }
+                }
+            }
         }
 
         return [

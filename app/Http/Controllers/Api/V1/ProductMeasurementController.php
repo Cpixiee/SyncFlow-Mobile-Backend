@@ -717,7 +717,7 @@ class ProductMeasurementController extends Controller
                         // Ada samples yang dikirim - proses seperti MANUAL (lanjut ke validasi dan processing di bawah)
                         break;
                     case 'DERIVED':
-                        // Auto dari measurement item lain - samples akan dihitung otomatis
+                        // ✅ NEW: Auto-copy samples dari source measurement item dan process variables/pre-processing/joint
                         $derivedFromId = $measurementPoint['setup']['source_derived_name_id'] ?? null;
                         if (!$derivedFromId) {
                             return $this->errorResponse(
@@ -726,13 +726,87 @@ class ProductMeasurementController extends Controller
                                 400
                             );
                         }
-                        return $this->successResponse([
-                            'status' => null,
-                            'message' => "Measurement akan diambil otomatis dari: {$derivedFromId}",
-                            'source_type' => 'DERIVED',
-                            'derived_from' => $derivedFromId,
-                            'samples' => []
-                        ], 'Waiting for derived data');
+
+                        // Build measurement context untuk akses ke source item
+                        $measurementContext = $this->buildMeasurementContext($measurement);
+                        
+                        // Cari source measurement item dari context atau measurement_results
+                        $sourceItemData = null;
+                        if (isset($measurementContext[$derivedFromId])) {
+                            $sourceItemData = $measurementContext[$derivedFromId];
+                        } else {
+                            // Cari dari measurement_results
+                            $measurementResults = $measurement->measurement_results ?? [];
+                            foreach ($measurementResults as $result) {
+                                if (($result['measurement_item_name_id'] ?? '') === $derivedFromId) {
+                                    $sourceItemData = $result;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (!$sourceItemData || empty($sourceItemData['samples'] ?? [])) {
+                            return $this->errorResponse(
+                                "Source measurement item '{$derivedFromId}' belum memiliki samples. Pastikan measurement item tersebut sudah di-check terlebih dahulu.",
+                                'SOURCE_NOT_READY',
+                                400
+                            );
+                        }
+
+                        // Copy samples dari source (hanya values: single_value atau before_after_value)
+                        $derivedSamples = [];
+                        $sourceSamples = $sourceItemData['samples'] ?? [];
+                        $sourceType = $measurementPoint['setup']['type'] ?? null;
+
+                        foreach ($sourceSamples as $sourceSample) {
+                            $derivedSample = [
+                                'sample_index' => $sourceSample['sample_index'] ?? count($derivedSamples) + 1,
+                            ];
+
+                            // Copy sample values berdasarkan type
+                            if ($sourceType === 'SINGLE' && isset($sourceSample['single_value'])) {
+                                $derivedSample['single_value'] = $sourceSample['single_value'];
+                            } elseif ($sourceType === 'BEFORE_AFTER' && isset($sourceSample['before_after_value'])) {
+                                $derivedSample['before_after_value'] = $sourceSample['before_after_value'];
+                            }
+
+                            // Copy qualitative_value jika ada
+                            if (isset($sourceSample['qualitative_value'])) {
+                                $derivedSample['qualitative_value'] = $sourceSample['qualitative_value'];
+                            }
+
+                            // Copy measurement_time jika ada
+                            if (isset($sourceSample['measurement_time'])) {
+                                $derivedSample['measurement_time'] = $sourceSample['measurement_time'];
+                            }
+
+                            $derivedSamples[] = $derivedSample;
+                        }
+
+                        // Build variable values untuk DERIVED item (bisa berbeda dengan source)
+                        $variableValues = $this->buildCompleteVariableValues($measurementPoint, $request->variable_values ?? [], $measurementContext);
+
+                        // Build measurement item data untuk processing
+                        $measurementItemData = [
+                            'measurement_item_name_id' => $request->measurement_item_name_id,
+                            'variable_values' => $variableValues,
+                            'samples' => $derivedSamples,
+                        ];
+
+                        // Process samples dengan variables dan pre-processing formulas (dari config DERIVED item)
+                        $processedSamples = $this->processSampleItem($measurementItemData, $measurementPoint, $measurementContext);
+                        
+                        // Evaluate berdasarkan evaluation type dengan measurement context
+                        $result = $this->evaluateSampleItem($processedSamples, $measurementPoint, $measurementItemData, $measurementContext);
+                        
+                        // Add measurement_item_name_id to result
+                        $result['measurement_item_name_id'] = $request->measurement_item_name_id;
+                        $result['source_derived_from'] = $derivedFromId; // Info bahwa ini derived dari item lain
+
+                        // Save hasil check sebagai "jejak" untuk comparison nanti
+                        $this->saveLastCheckData($measurement, $request->measurement_item_name_id, $result);
+
+                        return $this->successResponse($result, 'Derived measurement processed successfully');
                 }
             }
 
