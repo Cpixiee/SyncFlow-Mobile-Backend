@@ -118,6 +118,7 @@ Route::prefix('v1')->group(function () {
             Route::get('/', [ToolController::class, 'index']);
             Route::get('/models', [ToolController::class, 'getModels']);
             Route::get('/by-model', [ToolController::class, 'getByModel']);
+            Route::get('/overdue-calibration', [ToolController::class, 'getOverdueCalibration']); // ✅ NEW: Dashboard overdue calibration
             Route::get('/{id}', [ToolController::class, 'show']);
 
             // Admin and SuperAdmin can CRUD
@@ -149,6 +150,7 @@ Route::prefix('v1')->group(function () {
         // Issue Tracking Progress - available for authenticated users
         Route::prefix('issue-tracking')->group(function () {
             Route::get('/progress', [IssueController::class, 'getProgress']);
+            Route::get('/overdue', [IssueController::class, 'getOverdue']); // ✅ NEW: Dashboard overdue issues
         });
 
         // SuperAdmin only routes

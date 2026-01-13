@@ -559,5 +559,64 @@ class IssueController extends Controller
             );
         }
     }
+
+    /**
+     * Get overdue issues
+     * Endpoint: GET /issue-tracking/overdue
+     * Query params: date (required) - comparison date
+     * 
+     * Issue is overdue if:
+     * - due_date < comparison date
+     * - status NOT IN (SOLVED) - which means status IN (PENDING, ON_GOING)
+     */
+    public function getOverdue(Request $request)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'date' => 'required|date',
+            ]);
+
+            if ($validator->fails()) {
+                return $this->validationErrorResponse($validator->errors());
+            }
+
+            $comparisonDate = $request->input('date');
+            
+            // Get issues where due_date < comparison date and status NOT SOLVED
+            $issues = Issue::with(['creator:id,username,role', 'comments'])
+                ->whereNotNull('due_date')
+                ->where('due_date', '<', $comparisonDate)
+                ->whereIn('status', [IssueStatus::PENDING, IssueStatus::ON_GOING])
+                ->orderBy('due_date', 'asc') // Oldest overdue first
+                ->get();
+
+            $transformedIssues = $issues->map(function ($issue) {
+                return [
+                    'id' => $issue->id,
+                    'title' => $issue->issue_name, // Map issue_name to title
+                    'description' => $issue->description,
+                    'status' => $issue->status->value,
+                    'createdAt' => $issue->created_at->toISOString(),
+                    'priority' => null, // Field not exists in current schema
+                    'assignedTo' => null, // Field not exists in current schema
+                    'reportedBy' => $issue->creator ? $issue->creator->username : null,
+                    'dueDate' => $issue->due_date?->toISOString(),
+                    'commentCount' => $issue->comments->count(),
+                ];
+            })->values()->all();
+
+            return $this->successResponse(
+                $transformedIssues,
+                'Overdue issues retrieved successfully'
+            );
+
+        } catch (\Exception $e) {
+            return $this->errorResponse(
+                'Error retrieving overdue issues: ' . $e->getMessage(),
+                'OVERDUE_ISSUES_ERROR',
+                500
+            );
+        }
+    }
 }
 

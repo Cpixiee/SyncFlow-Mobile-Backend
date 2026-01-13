@@ -2985,20 +2985,15 @@ class ProductMeasurementController extends Controller
                 ->orderBy('created_at', 'desc')
                 ->get();
 
-            // Group by quarter and year
+            // ✅ FIX: Group by quarter and year from MEASUREMENT (not product)
             $grouped = [];
             foreach ($measurements as $measurement) {
-                // Try to get quarter from product first, otherwise calculate from due_date
-                $quarter = $measurement->product->quarter;
                 $quarterNum = null;
                 $year = null;
                 
-                if ($quarter) {
-                    // Use quarter from product
-                    $quarterNumber = $quarter->name; // e.g., "Q1", "Q2", etc.
-                    $year = $quarter->year;
-                    $quarterNum = (int) str_replace('Q', '', $quarterNumber);
-                } elseif ($measurement->due_date) {
+                // ✅ FIXED: Use due_date from MEASUREMENT (not product.quarter)
+                // Product quarter is when product was created, not when measurement was done
+                if ($measurement->due_date) {
                     // Calculate quarter from due_date
                     $dueDate = \Carbon\Carbon::parse($measurement->due_date);
                     $year = $dueDate->year;
@@ -3356,10 +3351,10 @@ class ProductMeasurementController extends Controller
                 ];
             }
 
-            // Calculate overall summary
-            // ✅ FIX: summary.sample = max sample count dari semua measurement items (bukan total)
+            // ✅ FIX: Calculate overall summary with clear metrics
             $maxSampleCount = 0;
-            $totalEvaluatedSamples = 0; // Samples that were actually evaluated (not SKIP_CHECK)
+            $totalEvaluatedSamples = 0; // Total samples yang di-evaluate (not SKIP_CHECK)
+            $totalMeasurementItems = count($measurementPointResults);
             
             foreach ($measurementPointResults as $pointResult) {
                 $sampleAmount = $pointResult['summary']['sample_amount'] ?? 0;
@@ -3385,18 +3380,33 @@ class ProductMeasurementController extends Controller
             }
             
             $summary = [
-                'sample' => $maxSampleCount, // Max sample count dari semua measurement items
+                'total_measurement_items' => $totalMeasurementItems, // ✅ NEW: Total measurement items
+                'max_sample_count' => $maxSampleCount, // ✅ RENAMED: Max sample count dari semua measurement items
+                'total_samples' => $totalEvaluatedSamples, // ✅ NEW: Total samples yang di-evaluate
                 'ok' => $okCount,
                 'ng' => $ngCount,
                 'ng_ratio' => $totalEvaluatedSamples > 0 ? ($ngCount / $totalEvaluatedSamples) * 100 : 0,
             ];
 
-            // Determine status
+            // ✅ FIX: Determine status correctly for COMPLETED measurements
             $status = 'TODO';
             if ($measurement->status === 'COMPLETED') {
-                $status = $okCount > 0 && $ngCount === 0 ? 'OK' : ($ngCount > 0 ? 'NEED_TO_MEASURE' : 'TODO');
+                // For COMPLETED: OK if all samples are OK, NG if any sample is NG
+                if ($ngCount > 0) {
+                    $status = 'NG'; // Ada sample NG
+                } elseif ($okCount > 0) {
+                    $status = 'OK'; // Semua OK
+                } else {
+                    // No evaluated samples (all SKIP_CHECK) - treat as OK
+                    $status = 'OK';
+                }
             } elseif ($measurement->status === 'IN_PROGRESS') {
-                $status = 'ONGOING';
+                // Check if pernah submit dengan NG (need to re-measure)
+                if ($this->hasBeenSubmittedWithNG($measurement)) {
+                    $status = 'NEED_TO_MEASURE';
+                } else {
+                    $status = 'ONGOING';
+                }
             } elseif ($measurement->status === 'PENDING') {
                 $status = 'TODO';
             }

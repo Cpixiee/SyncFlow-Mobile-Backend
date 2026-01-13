@@ -417,5 +417,64 @@ class ToolController extends Controller
             );
         }
     }
+
+    /**
+     * Get tools with overdue calibration
+     * Endpoint: GET /tools/overdue-calibration
+     * Query params: date (required) - comparison date
+     * 
+     * Tool is overdue if next_calibration_at < date
+     */
+    public function getOverdueCalibration(Request $request)
+    {
+        try {
+            $validator = Validator::make($request->all(), [
+                'date' => 'required|date',
+            ]);
+
+            if ($validator->fails()) {
+                return $this->validationErrorResponse($validator->errors());
+            }
+
+            $comparisonDate = $request->input('date');
+            
+            // Get tools where next_calibration_at < comparison date
+            // Only include ACTIVE tools with next_calibration_at set
+            $tools = Tool::where('status', ToolStatus::ACTIVE)
+                ->whereNotNull('next_calibration_at')
+                ->where('next_calibration_at', '<', $comparisonDate)
+                ->orderBy('next_calibration_at', 'asc') // Oldest overdue first
+                ->get();
+
+            $transformedTools = $tools->map(function ($tool) {
+                return [
+                    'id' => $tool->id,
+                    'toolName' => $tool->tool_name,
+                    'toolModel' => $tool->tool_model,
+                    'toolType' => $tool->tool_type->value,
+                    'toolTypeDescription' => $tool->tool_type->getDescription(),
+                    'lastCalibration' => $tool->last_calibration_at?->toISOString(),
+                    'nextCalibration' => $tool->next_calibration_at?->toISOString(),
+                    'imei' => $tool->imei,
+                    'status' => $tool->status->value,
+                    'statusDescription' => $tool->status->getDescription(),
+                    'createdAt' => $tool->created_at->toISOString(),
+                    'updatedAt' => $tool->updated_at->toISOString(),
+                ];
+            })->values()->all();
+
+            return $this->successResponse(
+                $transformedTools,
+                'Overdue calibration tools retrieved successfully'
+            );
+
+        } catch (\Exception $e) {
+            return $this->errorResponse(
+                'Error retrieving overdue calibration tools: ' . $e->getMessage(),
+                'OVERDUE_CALIBRATION_ERROR',
+                500
+            );
+        }
+    }
 }
 

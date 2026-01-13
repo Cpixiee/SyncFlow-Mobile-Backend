@@ -276,7 +276,7 @@ class AuthController extends Controller
             $authUser = JWTAuth::parseToken()->authenticate();
             
             if (!$authUser) {
-                return $this->unauthorizedResponse('User not found');
+                return $this->unauthorizedResponse('User not authenticated. Please login again.');
             }
 
             // Check if this is admin changing another user's password
@@ -350,6 +350,9 @@ class AuthController extends Controller
                 $targetUser->markPasswordChanged();
             }
 
+            // ✅ FIX: Refresh model to get latest data
+            $targetUser->refresh();
+
             // Prepare response data
             $userData = [
                 'id' => $targetUser->id,
@@ -357,7 +360,7 @@ class AuthController extends Controller
                 'username' => $targetUser->username,
                 'role' => $targetUser->role,
                 'must_change_password' => $targetUser->mustChangePassword(),
-                'password_changed_at' => $targetUser->password_changed_at->format('Y-m-d H:i:s'),
+                'password_changed_at' => $targetUser->password_changed_at ? $targetUser->password_changed_at->format('Y-m-d H:i:s') : null, // ✅ FIX: Add null check
                 'is_force_change' => $isAdminReset && $request->boolean('force_change', false),
                 'changed_by_admin' => $isAdminReset
             ];
