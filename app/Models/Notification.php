@@ -134,16 +134,16 @@ class Notification extends Model
      */
     public static function createNewIssue(int $userId, Issue $issue): self
     {
+        // ✅ FIX: Use issue_name instead of title, remove priority (not exists in Issue model)
         return self::create([
             'type' => 'NEW_ISSUE',
             'title' => 'Issue Baru Dibuat',
-            'message' => "Issue baru '{$issue->title}' telah dibuat dengan prioritas {$issue->priority}. Ringkasan: {$issue->description}",
+            'message' => "Issue baru '{$issue->issue_name}' telah dibuat. Ringkasan: " . substr($issue->description, 0, 100) . (strlen($issue->description) > 100 ? '...' : ''),
             'reference_type' => 'issue',
             'reference_id' => (string) $issue->id,
             'metadata' => [
                 'issue_id' => $issue->id,
-                'title' => $issue->title,
-                'priority' => $issue->priority,
+                'issue_name' => $issue->issue_name, // ✅ FIX: Use issue_name
                 'status' => $issue->status->value,
                 'created_by' => $issue->created_by
             ],
@@ -156,15 +156,16 @@ class Notification extends Model
      */
     public static function createIssueOverdue(int $userId, Issue $issue, int $daysOverdue): self
     {
+        // ✅ FIX: Use issue_name instead of title
         return self::create([
             'type' => 'ISSUE_OVERDUE',
             'title' => 'Issue Overdue',
-            'message' => "Issue '{$issue->title}' telah melewati due date {$daysOverdue} hari yang lalu. Status saat ini: {$issue->status->value}. Segera ambil tindakan!",
+            'message' => "Issue '{$issue->issue_name}' telah melewati due date {$daysOverdue} hari yang lalu. Status saat ini: {$issue->status->value}. Segera ambil tindakan!",
             'reference_type' => 'issue',
             'reference_id' => (string) $issue->id,
             'metadata' => [
                 'issue_id' => $issue->id,
-                'title' => $issue->title,
+                'issue_name' => $issue->issue_name, // ✅ FIX: Use issue_name
                 'status' => $issue->status->value,
                 'due_date' => $issue->due_date?->toISOString(),
                 'days_overdue' => $daysOverdue
@@ -180,16 +181,17 @@ class Notification extends Model
     {
         $issue = $comment->issue;
         
+        // ✅ FIX: Use issue_name instead of title
         return self::create([
             'type' => 'NEW_COMMENT',
             'title' => 'Komentar Baru pada Issue',
-            'message' => "{$comment->user->username} menambahkan komentar pada issue '{$issue->title}': " . substr($comment->comment, 0, 100) . (strlen($comment->comment) > 100 ? '...' : ''),
+            'message' => "{$comment->user->username} menambahkan komentar pada issue '{$issue->issue_name}': " . substr($comment->comment, 0, 100) . (strlen($comment->comment) > 100 ? '...' : ''),
             'reference_type' => 'issue_comment',
             'reference_id' => (string) $comment->id,
             'metadata' => [
                 'comment_id' => $comment->id,
                 'issue_id' => $issue->id,
-                'issue_title' => $issue->title,
+                'issue_name' => $issue->issue_name, // ✅ FIX: Use issue_name
                 'commenter_name' => $comment->user->username,
                 'comment_preview' => substr($comment->comment, 0, 200)
             ],

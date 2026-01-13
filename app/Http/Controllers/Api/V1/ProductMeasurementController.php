@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Models\ProductMeasurement;
 use App\Models\Product;
+use App\Models\Notification;
+use App\Models\LoginUser;
 use App\Enums\MeasurementType;
 use App\Enums\SampleStatus;
 use App\Traits\ApiResponseTrait;
@@ -2787,9 +2789,13 @@ class ProductMeasurementController extends Controller
                 ];
             }
 
-            // Update measurement ke COMPLETED + simpan hasil akhir + waktu submit
+            // ✅ FIX: Jika ada NG, status tetap IN_PROGRESS agar muncul di NEED_TO_MEASURE
+            // Hanya set COMPLETED jika semua hasil OK
+            $finalStatus = $overallStatus ? 'COMPLETED' : 'IN_PROGRESS';
+            
+            // Update measurement + simpan hasil akhir + waktu submit
             $measurement->update([
-                'status' => 'COMPLETED',
+                'status' => $finalStatus,
                 'overall_result' => $overallStatus,
                 'measurement_results' => $processedResults,
                 'measured_at' => now(),
@@ -2797,6 +2803,11 @@ class ProductMeasurementController extends Controller
             ]);
 
             $evaluationSummary = $this->generateEvaluationSummary($processedResults);
+
+            // ✅ NEW: Send PRODUCT_OUT_OF_SPEC notification if any item is NG
+            if (!$overallStatus) {
+                $this->sendProductOutOfSpecNotification($measurement, $processedResults, $measurementPoints);
+            }
 
             return $this->successResponse([
                 'status' => $overallStatus,
@@ -4275,5 +4286,47 @@ class ProductMeasurementController extends Controller
         $measurement->update([
             'last_check_data' => $lastCheckData
         ]);
+    }
+
+    /**
+     * Send PRODUCT_OUT_OF_SPEC notification when measurement has NG items
+     */
+    private function sendProductOutOfSpecNotification($measurement, array $processedResults, array $measurementPoints): void
+    {
+        // Build map of measurement points by name_id
+        $measurementPointMap = [];
+        foreach ($measurementPoints as $point) {
+            if (isset($point['setup']['name_id'])) {
+                $measurementPointMap[$point['setup']['name_id']] = $point;
+            }
+        }
+
+        // Find out-of-spec items (items with status false/NG)
+        $outOfSpecItems = [];
+        foreach ($processedResults as $result) {
+            $itemNameId = $result['measurement_item_name_id'] ?? null;
+            if (!$itemNameId || !isset($measurementPointMap[$itemNameId])) {
+                continue;
+            }
+
+            // Check if this item has NG status
+            if (isset($result['status']) && $result['status'] === false) {
+                $point = $measurementPointMap[$itemNameId];
+                $outOfSpecItems[] = [
+                    'item_name' => $point['setup']['name'] ?? $itemNameId,
+                    'item_name_id' => $itemNameId,
+                ];
+            }
+        }
+
+        // Only send notification if there are out-of-spec items
+        if (!empty($outOfSpecItems)) {
+            // Get ALL users to notify (not just admin/superadmin)
+            $recipients = LoginUser::all();
+
+            foreach ($recipients as $user) {
+                Notification::createProductOutOfSpec($user->id, $measurement, $outOfSpecItems);
+            }
+        }
     }
 }

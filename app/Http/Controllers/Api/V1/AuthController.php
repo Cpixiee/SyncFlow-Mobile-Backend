@@ -193,8 +193,17 @@ class AuthController extends Controller
      */
     public function createUser(Request $request): JsonResponse
     {
+        // Normalize role and position to lowercase for case-insensitive validation
+        $normalizedData = $request->all();
+        if ($request->filled('role')) {
+            $normalizedData['role'] = strtolower($request->role);
+        }
+        if ($request->filled('position')) {
+            $normalizedData['position'] = strtolower($request->position);
+        }
+
         // Validation
-        $validator = Validator::make($request->all(), [
+        $validator = Validator::make($normalizedData, [
             'username' => 'required|string|unique:login_users,username',
             'password' => 'nullable|string|min:6', // Optional, akan default ke admin#1234
             'role' => 'required|in:operator,admin,superadmin',
@@ -217,17 +226,17 @@ class AuthController extends Controller
             // Use default password if not provided or use provided password
             $password = $request->filled('password') ? $request->password : 'admin#1234';
             
-            // Create new user
+            // Create new user (use normalized values)
             $user = LoginUser::create([
-                'username' => $request->username,
+                'username' => $normalizedData['username'],
                 'password' => Hash::make($password),
-                'role' => $request->role,
-                'photo_url' => $request->photo_url,
-                'employee_id' => $request->employee_id,
-                'phone' => $request->phone,
-                'email' => $request->email,
-                'position' => $request->position,
-                'department' => $request->department,
+                'role' => $normalizedData['role'],
+                'photo_url' => $normalizedData['photo_url'] ?? null,
+                'employee_id' => $normalizedData['employee_id'],
+                'phone' => $normalizedData['phone'],
+                'email' => $normalizedData['email'],
+                'position' => $normalizedData['position'],
+                'department' => $normalizedData['department'],
                 'password_changed' => false, // Default belum pernah ganti password
                 'password_changed_at' => null,
             ]);
@@ -645,8 +654,14 @@ class AuthController extends Controller
                 return $this->unauthorizedResponse('User not authenticated');
             }
 
+            // Normalize role to lowercase for case-insensitive validation
+            $normalizedData = $request->all();
+            if ($request->filled('role')) {
+                $normalizedData['role'] = strtolower($request->role);
+            }
+
             // Validasi input role
-            $validator = Validator::make($request->all(), [
+            $validator = Validator::make($normalizedData, [
                 'role' => 'required|in:operator,admin,superadmin',
             ]);
 
@@ -668,9 +683,9 @@ class AuthController extends Controller
                 return $this->forbiddenResponse('You cannot change your own role using this endpoint');
             }
 
-            // Update hanya field role
+            // Update hanya field role (use normalized value)
             $targetUser->update([
-                'role' => $request->role,
+                'role' => $normalizedData['role'],
             ]);
 
             $userData = [
