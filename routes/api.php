@@ -69,6 +69,7 @@ Route::prefix('v1')->group(function () {
             Route::get('/by-product', [ProductMeasurementController::class, 'getByProduct']);
             Route::post('/', [ProductMeasurementController::class, 'store']);
             Route::post('/bulk', [ProductMeasurementController::class, 'bulkStore']);
+            Route::post('/bulk-set-batch-number', [ProductMeasurementController::class, 'bulkSetBatchNumber']);
             Route::post('/{productMeasurementId}/set-batch-number', [ProductMeasurementController::class, 'setBatchNumber']);
             Route::post('/{productMeasurementId}/submit', [ProductMeasurementController::class, 'submitMeasurement']);
             Route::post('/{productMeasurementId}/samples/check', [ProductMeasurementController::class, 'checkSamples']);

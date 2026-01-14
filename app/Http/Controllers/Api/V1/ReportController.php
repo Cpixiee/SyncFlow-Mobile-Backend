@@ -194,9 +194,11 @@ class ReportController extends Controller
 
             // Build measurement items list
             $measurementItems = [];
-            $measurementOk = 0;
-            $measurementNg = 0;
-            $todo = 0;
+            $measurementPassed = 0;  // OK untuk QUALITATIVE
+            $measurementFailed = 0;  // NG untuk QUALITATIVE
+            $measurementOk = 0;      // OK untuk QUANTITATIVE
+            $measurementNg = 0;      // NG untuk QUANTITATIVE
+            $todo = 0;               // Belum diukur
 
             foreach ($measurementPoints as $point) {
                 $nameId = $point['setup']['name_id'] ?? null;
@@ -215,21 +217,34 @@ class ReportController extends Controller
 
                 $name = $point['setup']['name'] ?? $nameId;
                 $nature = $point['setup']['nature'] ?? 'QUANTITATIVE';
-                $type = $nature === 'QUALITATIVE' ? 'QUALITATIVE JUDGMENT' : 'QUANTITATIVE JUDGMENT';
+                // ✅ FIX: Type menggunakan enum QUALITATIVE atau QUANTITATIVE (bukan JUDGMENT)
+                $type = $nature === 'QUALITATIVE' ? 'QUALITATIVE' : 'QUANTITATIVE';
 
-                // Determine status
-                $status = '-';
+                // ✅ FIX: Status menggunakan boolean (true/false) atau null (bukan string)
+                $status = null;
                 if ($itemResult) {
                     if ($itemResult['status'] === true) {
-                        $status = 'OK';
-                        $measurementOk++;
+                        $status = true;
+                        // Count berdasarkan type
+                        if ($type === 'QUALITATIVE') {
+                            $measurementPassed++;
+                        } else {
+                            $measurementOk++;
+                        }
                     } elseif ($itemResult['status'] === false) {
-                        $status = 'NG';
-                        $measurementNg++;
+                        $status = false;
+                        // Count berdasarkan type
+                        if ($type === 'QUALITATIVE') {
+                            $measurementFailed++;
+                        } else {
+                            $measurementNg++;
+                        }
                     } else {
+                        $status = null;
                         $todo++;
                     }
                 } else {
+                    $status = null;
                     $todo++;
                 }
 
@@ -250,12 +265,12 @@ class ReportController extends Controller
                 ],
                 'measurement_items' => $measurementItems,
                 'summary' => [
-                    'measurement_ok' => $measurementOk,
-                    'measurement_ng' => $measurementNg,
-                    'todo' => $todo,
+                    'measurement_passed' => $measurementPassed,    // ✅ OK untuk QUALITATIVE
+                    'measurement_failed' => $measurementFailed,    // ❌ NG untuk QUALITATIVE
+                    'measurement_ok' => $measurementOk,            // ✅ OK untuk QUANTITATIVE
+                    'measurement_ng' => $measurementNg,             // ❌ NG untuk QUANTITATIVE
+                    'todo' => $todo,                                // ⏳ Belum diukur
                 ],
-                'measurement_id' => $measurement->measurement_id,
-                'batch_number' => $measurement->batch_number,
             ], 'Report data retrieved successfully');
         } catch (\Exception $e) {
             return $this->errorResponse('Error retrieving report data: ' . $e->getMessage(), 'REPORT_DATA_FETCH_ERROR', 500);

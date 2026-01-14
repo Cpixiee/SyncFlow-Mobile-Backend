@@ -541,6 +541,121 @@ class ProductMeasurementController extends Controller
     }
 
     /**
+     * Bulk set batch numbers for multiple measurements
+     * POST /api/v1/product-measurement/bulk-set-batch-number
+     */
+    public function bulkSetBatchNumber(Request $request)
+    {
+        try {
+            $user = JWTAuth::parseToken()->authenticate();
+            
+            if (!$user) {
+                return $this->unauthorizedResponse('User not authenticated');
+            }
+
+            $validator = Validator::make($request->all(), [
+                'product_measurement_ids' => 'required|array|min:1',
+                'product_measurement_ids.*' => 'required|string|exists:product_measurements,measurement_id',
+                'batch_numbers' => 'required|array',
+                'batch_numbers.*' => 'required|string|max:255',
+            ]);
+
+            if ($validator->fails()) {
+                return $this->validationErrorResponse(
+                    $validator->errors(),
+                    'Request invalid'
+                );
+            }
+
+            $productMeasurementIds = $request->product_measurement_ids;
+            $batchNumbersMap = $request->batch_numbers;
+
+            // ✅ Validasi: Pastikan semua product_measurement_ids ada di batch_numbers map
+            $missingMeasurements = [];
+            foreach ($productMeasurementIds as $measurementId) {
+                if (!isset($batchNumbersMap[$measurementId])) {
+                    $missingMeasurements[] = $measurementId;
+                }
+            }
+            
+            if (!empty($missingMeasurements)) {
+                $missingList = implode(', ', $missingMeasurements);
+                $count = count($missingMeasurements);
+                $message = $count === 1 
+                    ? "Tidak ada batch number untuk measurement: {$missingList}"
+                    : "Tidak ada batch number untuk {$count} measurement: {$missingList}";
+                
+                // ✅ FIX: Gunakan validationErrorResponse dengan format yang konsisten
+                return $this->validationErrorResponse(
+                    [
+                        'batch_numbers' => [$message],
+                        'missing_measurements' => $missingMeasurements
+                    ],
+                    'Request invalid',
+                    'MISSING_BATCH_NUMBER'
+                );
+            }
+
+            $results = [];
+            $errors = [];
+
+            foreach ($productMeasurementIds as $measurementId) {
+                $batchNumber = $batchNumbersMap[$measurementId];
+                
+                $measurement = ProductMeasurement::where('measurement_id', $measurementId)->first();
+                
+                if (!$measurement) {
+                    $errors[$measurementId] = 'Measurement tidak ditemukan';
+                    continue;
+                }
+
+                // Check if batch_number already exists (unique validation)
+                $existingMeasurement = ProductMeasurement::where('batch_number', $batchNumber)
+                    ->where('measurement_id', '!=', $measurementId)
+                    ->first();
+                
+                if ($existingMeasurement) {
+                    $errors[$measurementId] = "Batch number '{$batchNumber}' sudah digunakan";
+                    continue;
+                }
+
+                // Update batch_number dan status
+                $measurement->update([
+                    'batch_number' => $batchNumber,
+                    'status' => 'IN_PROGRESS', // Status berubah dari TODO ke IN_PROGRESS
+                ]);
+
+                $results[$measurementId] = [
+                    'measurement_id' => $measurement->measurement_id,
+                    'batch_number' => $measurement->batch_number,
+                    'status' => $measurement->status,
+                ];
+            }
+
+            if (!empty($errors)) {
+                return $this->errorResponse(
+                    'Beberapa measurement gagal diupdate',
+                    'BULK_SET_BATCH_PARTIAL_ERROR',
+                    400,
+                    [
+                        'success' => $results,
+                        'errors' => $errors
+                    ]
+                );
+            }
+
+            return $this->successResponse($results, 'Batch numbers set successfully', 200);
+
+        } catch (\Exception $e) {
+            return $this->errorResponse(
+                'Error setting batch numbers: ' . $e->getMessage(),
+                'BULK_SET_BATCH_ERROR',
+                500
+            );
+        }
+    }
+
+    /**
      * Set batch number and move status from TODO to IN_PROGRESS
      */
     public function setBatchNumber(Request $request, string $productMeasurementId)
