@@ -4,6 +4,7 @@ namespace App\Helpers;
 
 use App\Models\Product;
 use App\Models\ProductMeasurement;
+use Illuminate\Support\Facades\Log;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
@@ -21,11 +22,23 @@ class ReportExcelHelper
     {
         $rows = [];
         
-        foreach ($measurementResults as $item) {
+        if (empty($measurementResults)) {
+            Log::warning('No measurement results to transform for product: ' . $product->product_id);
+            return $rows;
+        }
+        
+        foreach ($measurementResults as $itemIndex => $item) {
+            // Validate item structure
+            if (!isset($item['measurement_item_name_id'])) {
+                Log::warning('Measurement item missing name_id at index: ' . $itemIndex);
+                continue;
+            }
+            
             $itemNameId = $item['measurement_item_name_id'];
             $measurementPoint = $product->getMeasurementPointByNameId($itemNameId);
             
             if (!$measurementPoint) {
+                Log::warning('Measurement point not found for name_id: ' . $itemNameId);
                 continue; // Skip if measurement point not found
             }
             
@@ -149,6 +162,8 @@ class ReportExcelHelper
                 ];
             }
         }
+        
+        Log::info('Transform complete - Total rows generated: ' . count($rows) . ' from ' . count($measurementResults) . ' measurement items');
         
         return $rows;
     }
@@ -300,8 +315,17 @@ class ReportExcelHelper
     public static function getSheetNames(string $filePath): array
     {
         try {
-            $reader = \PhpOffice\PhpSpreadsheet\IOFactory::createReader('Xlsx');
+            // Check if file exists
+            if (!file_exists($filePath)) {
+                Log::error('Excel file not found: ' . $filePath);
+                return [];
+            }
+
+            // Try to detect file type automatically
+            $reader = \PhpOffice\PhpSpreadsheet\IOFactory::createReaderForFile($filePath);
             $reader->setReadDataOnly(false);
+            $reader->setReadEmptyCells(false);
+            
             $spreadsheet = $reader->load($filePath);
             
             $sheetNames = [];
@@ -316,9 +340,12 @@ class ReportExcelHelper
                 }
             }
             
+            Log::info('Sheet names extracted: ' . json_encode($sheetNames) . ' from file: ' . $filePath);
+            
             return $sheetNames;
         } catch (\Exception $e) {
-            \Log::error('Error getting sheet names: ' . $e->getMessage());
+            Log::error('Error getting sheet names from file: ' . $filePath . ' - Error: ' . $e->getMessage());
+            Log::error('Error trace: ' . $e->getTraceAsString());
             return [];
         }
     }

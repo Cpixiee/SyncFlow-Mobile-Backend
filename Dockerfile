@@ -1,13 +1,14 @@
-# Use PHP 8.3 with Apache untuk optimasi Ubuntu 22.04 / Debian 12
+# Use PHP 8.3 with Apache untuk optimasi Debian 11 (bullseye)
 FROM php:8.3-apache
 
 # Set working directory
 WORKDIR /var/www/html
 
-# Install system dependencies untuk Ubuntu 22.04 / Debian 12
+# Install system dependencies untuk Debian 11 (bullseye)
 RUN apt-get update && apt-get install -y \
     git \
     curl \
+    ca-certificates \
     libpng-dev \
     libonig-dev \
     libxml2-dev \
@@ -15,7 +16,7 @@ RUN apt-get update && apt-get install -y \
     unzip \
     libzip-dev \
     libfreetype6-dev \
-    libjpeg-dev \
+    libjpeg62-turbo-dev \
     libicu-dev \
     default-mysql-client \
     nano \
@@ -56,9 +57,9 @@ RUN chown -R www-data:www-data /var/www/html \
     && chmod -R 755 /var/www/html/bootstrap/cache \
     && chmod +x /var/www/html/artisan
 
-# Install dependencies dengan cache optimization
-RUN composer install --optimize-autoloader --no-dev --no-scripts \
-    && composer dump-autoload --optimize
+# Install dependencies dengan cache optimization (skip untuk build, akan dijalankan saat runtime)
+# RUN composer install --optimize-autoloader --no-dev --no-scripts \
+#     && composer dump-autoload --optimize
 
 # Configure Apache
 COPY docker/vhost.conf /etc/apache2/sites-available/000-default.conf

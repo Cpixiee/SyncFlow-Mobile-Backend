@@ -12,6 +12,7 @@ use App\Helpers\ReportExcelHelper;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Log;
 use Tymon\JWTAuth\Facades\JWTAuth;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
@@ -262,6 +263,9 @@ class ReportController extends Controller
                     'product_name' => $product->product_name,
                     'product_spec_name' => $product->product_spec_name,
                     'product_category' => $product->productCategory->name ?? null,
+                    'article_code' => $product->article_code ?? null,
+                    'no_document' => $product->no_document ?? null,
+                    'no_doc_reference' => $product->no_doc_reference ?? null,
                 ],
                 'measurement_items' => $measurementItems,
                 'summary' => [
@@ -341,8 +345,9 @@ class ReportController extends Controller
             // Store file (will be saved in storage/app/private/reports/master_files/)
             $filePath = $file->storeAs('reports/master_files', $storedFilename, 'local');
 
-            // Get sheet names from Excel file
-            $fullPath = storage_path('app/' . $filePath);
+            // Get sheet names from Excel file - use Storage path for correct disk location
+            // Disk 'local' root is storage/app/private, so filePath is relative to that
+            $fullPath = storage_path('app/private/' . $filePath);
             $sheetNames = ReportExcelHelper::getSheetNames($fullPath);
 
             // Save to database
@@ -432,15 +437,23 @@ class ReportController extends Controller
             // Get measurement results
             $measurementResults = $measurement->measurement_results ?? [];
             
+            // Log untuk debugging
+            Log::info('Download Excel - Measurement ID: ' . $measurement->measurement_id);
+            Log::info('Download Excel - Measurement Results Count: ' . count($measurementResults));
+            
             // Transform to Excel rows
             $dataRows = ReportExcelHelper::transformMeasurementResultsToExcelRows($product, $measurementResults);
+            
+            // Log hasil transform
+            Log::info('Download Excel - Data Rows Count: ' . count($dataRows));
 
             // Check if master file exists
             $masterFile = ReportMasterFile::where('product_measurement_id', $measurement->id)->first();
 
             if ($masterFile && Storage::disk('local')->exists($masterFile->file_path)) {
-                // Merge data ke master file
-                $masterFilePath = storage_path('app/' . $masterFile->file_path);
+                // Merge data ke master file - use Storage path for correct disk location
+                // Disk 'local' root is storage/app/private, so filePath is relative to that
+                $masterFilePath = storage_path('app/private/' . $masterFile->file_path);
                 $spreadsheet = ReportExcelHelper::mergeDataToMasterFile($masterFilePath, $dataRows, 'raw_data');
                 $filename = pathinfo($masterFile->original_filename, PATHINFO_FILENAME) . '.xlsx';
             } else {
@@ -514,14 +527,23 @@ class ReportController extends Controller
 
             // Get measurement results
             $measurementResults = $measurement->measurement_results ?? [];
+            
+            // Log untuk debugging
+            Log::info('Download PDF - Measurement ID: ' . $measurement->measurement_id);
+            Log::info('Download PDF - Measurement Results Count: ' . count($measurementResults));
+            
             $dataRows = ReportExcelHelper::transformMeasurementResultsToExcelRows($product, $measurementResults);
+            
+            // Log hasil transform
+            Log::info('Download PDF - Data Rows Count: ' . count($dataRows));
 
             // Check if master file exists
             $masterFile = ReportMasterFile::where('product_measurement_id', $measurement->id)->first();
 
             if ($masterFile && Storage::disk('local')->exists($masterFile->file_path)) {
-                // Convert each sheet to PDF
-                $masterFilePath = storage_path('app/' . $masterFile->file_path);
+                // Convert each sheet to PDF - use Storage path for correct disk location
+                // Disk 'local' root is storage/app/private, so filePath is relative to that
+                $masterFilePath = storage_path('app/private/' . $masterFile->file_path);
                 
                 // Merge data to raw_data sheet first
                 $spreadsheet = ReportExcelHelper::mergeDataToMasterFile($masterFilePath, $dataRows, 'raw_data');

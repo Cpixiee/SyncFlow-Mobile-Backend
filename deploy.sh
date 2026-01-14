@@ -22,7 +22,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration
-SERVER_IP="139.59.231.237"
+SERVER_IP="103.236.140.19"
 SERVER_USER="root"
 SERVER_PATH="/root/SyncFlow"
 CONTAINER_NAME="syncflow-api"
