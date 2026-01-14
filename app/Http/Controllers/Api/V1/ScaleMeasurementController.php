@@ -482,10 +482,15 @@ class ScaleMeasurementController extends Controller
                 return $this->unauthorizedResponse('User not authenticated');
             }
 
+            // Support two formats:
+            // 1. batch_number (string) - untuk semua product dengan auto-suffix
+            // 2. batch_numbers (object) - untuk set batch_number per product
             $validator = Validator::make($request->all(), [
                 'product_ids' => 'required|array|min:1',
                 'product_ids.*' => 'required|string|exists:products,product_id',
-                'batch_number' => 'required|string',
+                'batch_number' => 'required_without:batch_numbers|string',
+                'batch_numbers' => 'required_without:batch_number|array',
+                'batch_numbers.*' => 'required|string',
                 'measurement_date' => 'required|date',
             ]);
 
@@ -498,6 +503,31 @@ class ScaleMeasurementController extends Controller
 
             $results = [];
             $products = Product::whereIn('product_id', $request->product_ids)->get();
+            $batchNumbersMap = $request->batch_numbers ?? [];
+
+            // ✅ Validasi: Jika menggunakan batch_numbers, pastikan semua product_ids ada di map
+            if (!empty($batchNumbersMap)) {
+                $missingProducts = [];
+                foreach ($request->product_ids as $productId) {
+                    if (!isset($batchNumbersMap[$productId])) {
+                        $missingProducts[] = $productId;
+                    }
+                }
+                
+                if (!empty($missingProducts)) {
+                    $missingList = implode(', ', $missingProducts);
+                    $count = count($missingProducts);
+                    $message = $count === 1 
+                        ? "Tidak ada batch number untuk product: {$missingList}"
+                        : "Tidak ada batch number untuk {$count} product: {$missingList}";
+                    
+                    return $this->errorResponse(
+                        $message,
+                        'MISSING_BATCH_NUMBER',
+                        400
+                    );
+                }
+            }
 
             foreach ($products as $product) {
                 // Check duplicate
@@ -509,8 +539,26 @@ class ScaleMeasurementController extends Controller
                     continue; // Skip duplicates
                 }
 
-                // Generate unique batch_number for each measurement
-                $batchNumber = $request->batch_number . '-' . strtoupper(substr(uniqid(), -6));
+                // Determine batch_number:
+                // 1. Jika ada batch_numbers map, gunakan batch_number untuk product ini
+                // 2. Jika tidak, gunakan batch_number dengan auto-suffix
+                if (!empty($batchNumbersMap) && isset($batchNumbersMap[$product->product_id])) {
+                    // Format baru: batch_numbers object dengan mapping per product
+                    $batchNumber = $batchNumbersMap[$product->product_id];
+                    
+                    // Validate uniqueness
+                    $existingBatch = ScaleMeasurement::where('batch_number', $batchNumber)->first();
+                    if ($existingBatch) {
+                        return $this->errorResponse(
+                            "Batch number '{$batchNumber}' sudah digunakan untuk product lain",
+                            'DUPLICATE_BATCH_NUMBER',
+                            400
+                        );
+                    }
+                } else {
+                    // Format lama: batch_number dengan auto-suffix
+                    $batchNumber = $request->batch_number . '-' . strtoupper(substr(uniqid(), -6));
+                }
 
                 $measurement = ScaleMeasurement::create([
                     'product_id' => $product->id,
