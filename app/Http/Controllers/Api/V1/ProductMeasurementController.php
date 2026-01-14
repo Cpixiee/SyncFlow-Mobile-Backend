@@ -2805,8 +2805,26 @@ class ProductMeasurementController extends Controller
             $evaluationSummary = $this->generateEvaluationSummary($processedResults);
 
             // ✅ NEW: Send PRODUCT_OUT_OF_SPEC notification if any item is NG
+            // ✅ NEW: Auto-create new measurement for re-measurement when NG
+            $newMeasurementId = null;
             if (!$overallStatus) {
                 $this->sendProductOutOfSpecNotification($measurement, $processedResults, $measurementPoints);
+                
+                // Auto-create new measurement dengan status TODO (batch_number bisa di-set nanti)
+                $newMeasurement = ProductMeasurement::create([
+                    'product_id' => $measurement->product_id,
+                    'batch_number' => null, // Batch number akan di-set via setBatchNumber
+                    'sample_count' => $measurement->sample_count,
+                    'measurement_type' => $measurement->measurement_type,
+                    'status' => 'TODO', // Status TODO agar bisa di-set batch_number
+                    'sample_status' => SampleStatus::NOT_COMPLETE,
+                    'measured_by' => $measurement->measured_by,
+                    'due_date' => $measurement->due_date,
+                    'measured_at' => null,
+                    'notes' => null,
+                ]);
+                
+                $newMeasurementId = $newMeasurement->measurement_id;
             }
 
             return $this->successResponse([
@@ -2814,6 +2832,7 @@ class ProductMeasurementController extends Controller
                 'overall_result' => $overallStatus ? 'OK' : 'NG',
                 'evaluation_summary' => $evaluationSummary,
                 'samples' => $processedResults,
+                'new_measurement_id' => $newMeasurementId, // ✅ NEW: Return new measurement ID jika NG
             ], 'Measurement results processed successfully');
 
         } catch (\Exception $e) {
