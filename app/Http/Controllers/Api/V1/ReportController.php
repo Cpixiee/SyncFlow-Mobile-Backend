@@ -437,15 +437,36 @@ class ReportController extends Controller
             // Get measurement results
             $measurementResults = $measurement->measurement_results ?? [];
             
-            // Log untuk debugging
+            // Log untuk debugging - detailed
             Log::info('Download Excel - Measurement ID: ' . $measurement->measurement_id);
             Log::info('Download Excel - Measurement Results Count: ' . count($measurementResults));
+            
+            // Log struktur data untuk debugging
+            if (!empty($measurementResults)) {
+                $firstItem = $measurementResults[0] ?? null;
+                if ($firstItem) {
+                    Log::info('Download Excel - First Item Structure: ' . json_encode([
+                        'has_name_id' => isset($firstItem['measurement_item_name_id']),
+                        'name_id' => $firstItem['measurement_item_name_id'] ?? null,
+                        'has_samples' => isset($firstItem['samples']),
+                        'samples_count' => isset($firstItem['samples']) ? count($firstItem['samples']) : 0,
+                        'first_sample_keys' => !empty($firstItem['samples']) ? array_keys($firstItem['samples'][0] ?? []) : [],
+                    ]));
+                }
+            } else {
+                Log::warning('Download Excel - Measurement Results is EMPTY for Measurement ID: ' . $measurement->measurement_id);
+            }
             
             // Transform to Excel rows
             $dataRows = ReportExcelHelper::transformMeasurementResultsToExcelRows($product, $measurementResults);
             
             // Log hasil transform
             Log::info('Download Excel - Data Rows Count: ' . count($dataRows));
+            
+            // Log sample data rows jika ada
+            if (!empty($dataRows)) {
+                Log::info('Download Excel - First Data Row: ' . json_encode($dataRows[0] ?? null));
+            }
 
             // Check if master file exists
             $masterFile = ReportMasterFile::where('product_measurement_id', $measurement->id)->first();

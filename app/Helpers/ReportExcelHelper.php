@@ -30,7 +30,7 @@ class ReportExcelHelper
         foreach ($measurementResults as $itemIndex => $item) {
             // Validate item structure
             if (!isset($item['measurement_item_name_id'])) {
-                Log::warning('Measurement item missing name_id at index: ' . $itemIndex);
+                Log::warning('Measurement item missing name_id at index: ' . $itemIndex . ' - Item: ' . json_encode(array_keys($item ?? [])));
                 continue;
             }
             
@@ -38,9 +38,12 @@ class ReportExcelHelper
             $measurementPoint = $product->getMeasurementPointByNameId($itemNameId);
             
             if (!$measurementPoint) {
-                Log::warning('Measurement point not found for name_id: ' . $itemNameId);
+                Log::warning('Measurement point not found for name_id: ' . $itemNameId . ' (Product: ' . $product->product_id . ')');
                 continue; // Skip if measurement point not found
             }
+            
+            // Log untuk debugging item yang sedang diproses
+            Log::debug('Processing item: ' . $itemNameId . ' - Samples count: ' . (isset($item['samples']) ? count($item['samples']) : 0));
             
             $displayName = $measurementPoint['setup']['name'] ?? $itemNameId;
             $type = $measurementPoint['setup']['type'] ?? 'SINGLE';
@@ -49,21 +52,36 @@ class ReportExcelHelper
             
             // 1. Process samples (Single/Before/After)
             if (!empty($item['samples'])) {
-                foreach ($item['samples'] as $sample) {
-                    $sampleIndex = $sample['sample_index'] ?? null;
+                foreach ($item['samples'] as $sampleIndex => $sample) {
+                    $sampleIdx = $sample['sample_index'] ?? ($sampleIndex + 1);
                     
-                    // Raw values - SINGLE type
-                    if ($type === 'SINGLE' && isset($sample['raw_values']['single_value'])) {
+                    // ✅ FIX: Check for raw_values structure first (new format)
+                    $hasRawValues = isset($sample['raw_values']) && is_array($sample['raw_values']);
+                    
+                    // Log untuk debugging
+                    Log::debug("Processing sample - Item: $itemNameId, Sample Index: $sampleIdx, Type: $type, Nature: $nature, Has raw_values: " . ($hasRawValues ? 'yes' : 'no') . ", Has single_value: " . (isset($sample['single_value']) ? 'yes' : 'no'));
+                    
+                    // Raw values - SINGLE type (from raw_values structure)
+                    if ($type === 'SINGLE' && $hasRawValues && isset($sample['raw_values']['single_value'])) {
                         $rows[] = [
                             'name' => $displayName,
                             'type' => 'Single',
-                            'sample_index' => $sampleIndex,
+                            'sample_index' => $sampleIdx,
                             'result' => $sample['raw_values']['single_value']
                         ];
                     }
+                    // ✅ FIX: Handle direct single_value (most common format - prioritize this)
+                    elseif ($type === 'SINGLE' && isset($sample['single_value']) && $sample['single_value'] !== null) {
+                        $rows[] = [
+                            'name' => $displayName,
+                            'type' => 'Single',
+                            'sample_index' => $sampleIdx,
+                            'result' => $sample['single_value']
+                        ];
+                    }
                     
-                    // Raw values - BEFORE_AFTER type
-                    if ($type === 'BEFORE_AFTER' && isset($sample['raw_values']['before_after_value'])) {
+                    // Raw values - BEFORE_AFTER type (from raw_values structure)
+                    if ($type === 'BEFORE_AFTER' && $hasRawValues && isset($sample['raw_values']['before_after_value'])) {
                         $beforeAfter = $sample['raw_values']['before_after_value'];
                         
                         if (is_array($beforeAfter)) {
@@ -71,7 +89,7 @@ class ReportExcelHelper
                                 $rows[] = [
                                     'name' => $displayName,
                                     'type' => 'Before',
-                                    'sample_index' => $sampleIndex,
+                                    'sample_index' => $sampleIdx,
                                     'result' => $beforeAfter['before']
                                 ];
                             }
@@ -79,48 +97,72 @@ class ReportExcelHelper
                                 $rows[] = [
                                     'name' => $displayName,
                                     'type' => 'After',
-                                    'sample_index' => $sampleIndex,
+                                    'sample_index' => $sampleIdx,
                                     'result' => $beforeAfter['after']
                                 ];
                             }
-                        } else {
-                            // Handle case where before_after_value is not array (legacy format)
-                            if (isset($sample['before_after_value']['before'])) {
+                        }
+                    }
+                    // ✅ FIX: Handle direct before_after_value (most common format - prioritize this)
+                    if ($type === 'BEFORE_AFTER' && isset($sample['before_after_value']) && $sample['before_after_value'] !== null) {
+                        $beforeAfter = $sample['before_after_value'];
+                        if (is_array($beforeAfter)) {
+                            if (isset($beforeAfter['before'])) {
                                 $rows[] = [
                                     'name' => $displayName,
                                     'type' => 'Before',
-                                    'sample_index' => $sampleIndex,
-                                    'result' => $sample['before_after_value']['before']
+                                    'sample_index' => $sampleIdx,
+                                    'result' => $beforeAfter['before']
                                 ];
                             }
-                            if (isset($sample['before_after_value']['after'])) {
+                            if (isset($beforeAfter['after'])) {
                                 $rows[] = [
                                     'name' => $displayName,
                                     'type' => 'After',
-                                    'sample_index' => $sampleIndex,
-                                    'result' => $sample['before_after_value']['after']
+                                    'sample_index' => $sampleIdx,
+                                    'result' => $beforeAfter['after']
                                 ];
                             }
                         }
                     }
                     
-                    // Qualitative value
-                    if ($nature === 'QUALITATIVE' && isset($sample['raw_values']['qualitative_value'])) {
+                    // Qualitative value (from raw_values structure)
+                    if ($nature === 'QUALITATIVE' && $hasRawValues && isset($sample['raw_values']['qualitative_value'])) {
                         $rows[] = [
                             'name' => $displayName,
                             'type' => 'Single',
-                            'sample_index' => $sampleIndex,
+                            'sample_index' => $sampleIdx,
                             'result' => $sample['raw_values']['qualitative_value'] ? 1 : 0 // Convert boolean to int
                         ];
                     }
+                    // ✅ FIX: Handle direct qualitative_value (most common format - prioritize this)
+                    elseif ($nature === 'QUALITATIVE' && isset($sample['qualitative_value']) && $sample['qualitative_value'] !== null) {
+                        $rows[] = [
+                            'name' => $displayName,
+                            'type' => 'Single',
+                            'sample_index' => $sampleIdx,
+                            'result' => $sample['qualitative_value'] ? 1 : 0
+                        ];
+                    }
                     
-                    // Processed values (pre-processing formulas)
+                    // Processed values (pre-processing formulas) - from processed_values
                     if (!empty($sample['processed_values']) && is_array($sample['processed_values'])) {
                         foreach ($sample['processed_values'] as $formulaName => $value) {
                             $rows[] = [
                                 'name' => $displayName,
                                 'type' => 'Pre Processing Formula',
-                                'sample_index' => $sampleIndex,
+                                'sample_index' => $sampleIdx,
+                                'result' => $value
+                            ];
+                        }
+                    }
+                    // ✅ FIX: Handle pre_processing_formula_values (alternative format)
+                    elseif (!empty($sample['pre_processing_formula_values']) && is_array($sample['pre_processing_formula_values'])) {
+                        foreach ($sample['pre_processing_formula_values'] as $formulaName => $value) {
+                            $rows[] = [
+                                'name' => $displayName,
+                                'type' => 'Pre Processing Formula',
+                                'sample_index' => $sampleIdx,
                                 'result' => $value
                             ];
                         }
@@ -197,24 +239,35 @@ class ReportExcelHelper
         
         // Add data rows
         $row = 2;
-        foreach ($dataRows as $dataRow) {
-            $sheet->setCellValue('A' . $row, $dataRow['name']);
-            $sheet->setCellValue('B' . $row, $dataRow['type']);
-            $sheet->setCellValue('C' . $row, $dataRow['sample_index'] ?? '-');
-            $sheet->setCellValue('D' . $row, $dataRow['result']);
-            
-            // Style data cells
-            $sheet->getStyle('A' . $row . ':D' . $row)->applyFromArray([
-                'borders' => [
-                    'allBorders' => ['borderStyle' => Border::BORDER_THIN]
-                ],
-                'alignment' => ['vertical' => Alignment::VERTICAL_CENTER]
+        if (empty($dataRows)) {
+            Log::warning('No data rows to add to Excel - creating empty file with headers only');
+            // Add a message row if no data
+            $sheet->setCellValue('A2', 'No data available');
+            $sheet->mergeCells('A2:D2');
+            $sheet->getStyle('A2')->applyFromArray([
+                'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
+                'font' => ['italic' => true, 'color' => ['rgb' => '999999']]
             ]);
-            
-            // Right align result column
-            $sheet->getStyle('D' . $row)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_RIGHT);
-            
-            $row++;
+        } else {
+            foreach ($dataRows as $dataRow) {
+                $sheet->setCellValue('A' . $row, $dataRow['name'] ?? '');
+                $sheet->setCellValue('B' . $row, $dataRow['type'] ?? '');
+                $sheet->setCellValue('C' . $row, $dataRow['sample_index'] ?? '-');
+                $sheet->setCellValue('D' . $row, $dataRow['result'] ?? '');
+                
+                // Style data cells
+                $sheet->getStyle('A' . $row . ':D' . $row)->applyFromArray([
+                    'borders' => [
+                        'allBorders' => ['borderStyle' => Border::BORDER_THIN]
+                    ],
+                    'alignment' => ['vertical' => Alignment::VERTICAL_CENTER]
+                ]);
+                
+                // Right align result column
+                $sheet->getStyle('D' . $row)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_RIGHT);
+                
+                $row++;
+            }
         }
         
         // Auto-size columns
@@ -275,24 +328,35 @@ class ReportExcelHelper
         
         // Add data rows
         $row = 2;
-        foreach ($dataRows as $dataRow) {
-            $sheet->setCellValue('A' . $row, $dataRow['name']);
-            $sheet->setCellValue('B' . $row, $dataRow['type']);
-            $sheet->setCellValue('C' . $row, $dataRow['sample_index'] ?? '-');
-            $sheet->setCellValue('D' . $row, $dataRow['result']);
-            
-            // Style data cells
-            $sheet->getStyle('A' . $row . ':D' . $row)->applyFromArray([
-                'borders' => [
-                    'allBorders' => ['borderStyle' => Border::BORDER_THIN]
-                ],
-                'alignment' => ['vertical' => Alignment::VERTICAL_CENTER]
+        if (empty($dataRows)) {
+            Log::warning('No data rows to merge to master file - only headers will be shown');
+            // Add a message row if no data
+            $sheet->setCellValue('A2', 'No data available');
+            $sheet->mergeCells('A2:D2');
+            $sheet->getStyle('A2')->applyFromArray([
+                'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER],
+                'font' => ['italic' => true, 'color' => ['rgb' => '999999']]
             ]);
-            
-            // Right align result column
-            $sheet->getStyle('D' . $row)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_RIGHT);
-            
-            $row++;
+        } else {
+            foreach ($dataRows as $dataRow) {
+                $sheet->setCellValue('A' . $row, $dataRow['name'] ?? '');
+                $sheet->setCellValue('B' . $row, $dataRow['type'] ?? '');
+                $sheet->setCellValue('C' . $row, $dataRow['sample_index'] ?? '-');
+                $sheet->setCellValue('D' . $row, $dataRow['result'] ?? '');
+                
+                // Style data cells
+                $sheet->getStyle('A' . $row . ':D' . $row)->applyFromArray([
+                    'borders' => [
+                        'allBorders' => ['borderStyle' => Border::BORDER_THIN]
+                    ],
+                    'alignment' => ['vertical' => Alignment::VERTICAL_CENTER]
+                ]);
+                
+                // Right align result column
+                $sheet->getStyle('D' . $row)->getAlignment()->setHorizontal(Alignment::HORIZONTAL_RIGHT);
+                
+                $row++;
+            }
         }
         
         // Auto-size columns
