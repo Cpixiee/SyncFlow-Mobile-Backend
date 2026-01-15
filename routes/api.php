@@ -170,6 +170,10 @@ Route::prefix('v1')->group(function () {
             // Specific route BEFORE generic {id} route
             Route::delete('/all-read', [\App\Http\Controllers\Api\V1\NotificationController::class, 'deleteAllRead']);
             Route::delete('/{id}', [\App\Http\Controllers\Api\V1\NotificationController::class, 'destroy']);
+            
+            // Manual trigger for overdue issues check (admin/superadmin only)
+            Route::post('/trigger-overdue-check', [\App\Http\Controllers\Api\V1\NotificationController::class, 'triggerOverdueIssuesCheck'])
+                ->middleware('role:admin,superadmin');
         });
 
         // Reports - available for all authenticated users

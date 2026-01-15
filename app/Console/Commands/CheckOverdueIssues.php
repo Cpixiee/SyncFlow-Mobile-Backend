@@ -32,9 +32,10 @@ class CheckOverdueIssues extends Command
         $this->info('Checking for overdue issues...');
 
         // Get issues that are PENDING or ON_GOING and past due date
+        // Note: Status enum uses PENDING and ON_GOING (not OPEN/IN_PROGRESS)
         $overdueIssues = Issue::whereIn('status', [IssueStatus::PENDING, IssueStatus::ON_GOING])
             ->whereNotNull('due_date')
-            ->where('due_date', '<', now())
+            ->where('due_date', '<', now()->toDateString())
             ->get();
 
         if ($overdueIssues->isEmpty()) {
@@ -48,7 +49,7 @@ class CheckOverdueIssues extends Command
             $daysOverdue = abs(now()->diffInDays($issue->due_date, false));
             $daysOverdue = ceil($daysOverdue);
 
-            // Get ALL users to notify (not just assigned/admin)
+            // Get recipients: Semua user (semua role)
             $recipients = LoginUser::all();
 
             foreach ($recipients as $user) {

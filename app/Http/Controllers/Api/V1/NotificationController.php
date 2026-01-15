@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Notification;
 use App\Traits\ApiResponseTrait;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Validator;
 use Tymon\JWTAuth\Facades\JWTAuth;
 
@@ -266,6 +267,43 @@ class NotificationController extends Controller
             return $this->errorResponse(
                 'Error deleting notifications: ' . $e->getMessage(),
                 'DELETE_ALL_ERROR',
+                500
+            );
+        }
+    }
+
+    /**
+     * Manually trigger overdue issues check (for testing)
+     * Only available for admin and superadmin
+     */
+    public function triggerOverdueIssuesCheck()
+    {
+        try {
+            // Get authenticated user
+            $user = JWTAuth::parseToken()->authenticate();
+            
+            if (!$user) {
+                return $this->unauthorizedResponse('User not authenticated');
+            }
+
+            // Only admin and superadmin can trigger manually
+            if (!in_array($user->role, ['admin', 'superadmin'])) {
+                return $this->forbiddenResponse('Only admin and superadmin can trigger this check');
+            }
+
+            // Call the command logic
+            Artisan::call('notifications:check-overdue-issues');
+            $output = Artisan::output();
+
+            return $this->successResponse([
+                'message' => 'Overdue issues check completed',
+                'output' => trim($output)
+            ], 'Overdue issues check triggered successfully');
+
+        } catch (\Exception $e) {
+            return $this->errorResponse(
+                'Error triggering overdue issues check: ' . $e->getMessage(),
+                'TRIGGER_OVERDUE_CHECK_ERROR',
                 500
             );
         }
