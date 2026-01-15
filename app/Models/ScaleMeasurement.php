@@ -14,6 +14,7 @@ class ScaleMeasurement extends Model
     protected $fillable = [
         'scale_measurement_id',
         'batch_number',
+        'machine_number',
         'product_id',
         'measurement_date',
         'weight',

@@ -8,6 +8,7 @@ use App\Models\IssueComment;
 use App\Models\Notification;
 use App\Models\LoginUser;
 use App\Enums\IssueStatus;
+use App\Enums\IssueCategory;
 use App\Traits\ApiResponseTrait;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
@@ -34,11 +35,25 @@ class IssueController extends Controller
 
             $query = Issue::with(['creator:id,username,role', 'comments.user:id,username,role']);
 
+            // Filter by archived status (default: exclude archived)
+            $includeArchived = $request->input('include_archived', false);
+            if (!$includeArchived) {
+                $query->notArchived();
+            }
+
             // Filter by status
             if ($request->has('status')) {
                 $status = strtoupper($request->input('status'));
                 if (in_array($status, ['PENDING', 'ON_GOING', 'SOLVED'])) {
                     $query->where('status', $status);
+                }
+            }
+
+            // Filter by category
+            if ($request->has('category')) {
+                $category = strtoupper($request->input('category'));
+                if (in_array($category, ['CUSTOMER_CLAIM', 'INTERNAL_DEFECT', 'NON_CONFORMITY', 'QUALITY_INFORMATION', 'OTHER'])) {
+                    $query->where('category', $category);
                 }
             }
 
@@ -63,6 +78,9 @@ class IssueController extends Controller
                         'status' => $issue->status->value,
                         'status_description' => $issue->status->getDescription(),
                         'status_color' => $issue->status->getColor(),
+                        'category' => $issue->category->value,
+                        'category_label' => $issue->category->getLabel(),
+                        'is_archived' => $issue->is_archived,
                         'due_date' => $issue->due_date?->format('Y-m-d'),
                         'created_by' => [
                             'id' => $issue->creator->id,
@@ -116,6 +134,9 @@ class IssueController extends Controller
                     'status' => $issue->status->value,
                     'status_description' => $issue->status->getDescription(),
                     'status_color' => $issue->status->getColor(),
+                    'category' => $issue->category->value,
+                    'category_label' => $issue->category->getLabel(),
+                    'is_archived' => $issue->is_archived,
                     'due_date' => $issue->due_date?->format('Y-m-d'),
                     'created_by' => [
                         'id' => $issue->creator->id,
@@ -162,6 +183,7 @@ class IssueController extends Controller
                 'issue_name' => 'required|string|max:255',
                 'description' => 'required|string',
                 'status' => ['required', new Enum(IssueStatus::class)],
+                'category' => ['nullable', new Enum(IssueCategory::class)],
                 'due_date' => 'nullable|date|after_or_equal:today',
             ]);
 
@@ -174,6 +196,7 @@ class IssueController extends Controller
                 'issue_name' => $request->input('issue_name'),
                 'description' => $request->input('description'),
                 'status' => $request->input('status'),
+                'category' => $request->input('category', IssueCategory::OTHER->value),
                 'created_by' => $user->id,
                 'due_date' => $request->input('due_date'),
             ]);
@@ -233,6 +256,7 @@ class IssueController extends Controller
                 'issue_name' => 'nullable|string|max:255',
                 'description' => 'nullable|string',
                 'status' => ['nullable', new Enum(IssueStatus::class)],
+                'category' => ['nullable', new Enum(IssueCategory::class)],
                 'due_date' => 'nullable|date|after_or_equal:today',
             ]);
 
@@ -249,6 +273,9 @@ class IssueController extends Controller
             }
             if ($request->has('status')) {
                 $issue->status = $request->input('status');
+            }
+            if ($request->has('category')) {
+                $issue->category = $request->input('category');
             }
             if ($request->has('due_date')) {
                 $issue->due_date = $request->input('due_date');
@@ -614,6 +641,66 @@ class IssueController extends Controller
             return $this->errorResponse(
                 'Error retrieving overdue issues: ' . $e->getMessage(),
                 'OVERDUE_ISSUES_ERROR',
+                500
+            );
+        }
+    }
+
+    /**
+     * Archive an issue
+     * POST /api/v1/issues/{id}/archive
+     */
+    public function archive(int $id)
+    {
+        try {
+            $issue = Issue::find($id);
+
+            if (!$issue) {
+                return $this->notFoundResponse('Issue not found');
+            }
+
+            $issue->update(['is_archived' => true]);
+
+            return $this->successResponse([
+                'id' => $issue->id,
+                'issue_name' => $issue->issue_name,
+                'is_archived' => $issue->is_archived,
+            ], 'Issue archived successfully');
+
+        } catch (\Exception $e) {
+            return $this->errorResponse(
+                'Error archiving issue: ' . $e->getMessage(),
+                'ISSUE_ARCHIVE_ERROR',
+                500
+            );
+        }
+    }
+
+    /**
+     * Unarchive an issue
+     * POST /api/v1/issues/{id}/unarchive
+     */
+    public function unarchive(int $id)
+    {
+        try {
+            $issue = Issue::find($id);
+
+            if (!$issue) {
+                return $this->notFoundResponse('Issue not found');
+            }
+
+            $issue->update(['is_archived' => false]);
+
+            return $this->successResponse([
+                'id' => $issue->id,
+                'issue_name' => $issue->issue_name,
+                'is_archived' => $issue->is_archived,
+            ], 'Issue unarchived successfully');
+
+        } catch (\Exception $e) {
+            return $this->errorResponse(
+                'Error unarchiving issue: ' . $e->getMessage(),
+                'ISSUE_UNARCHIVE_ERROR',
                 500
             );
         }

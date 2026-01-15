@@ -101,6 +101,7 @@ class ScaleMeasurementController extends Controller
                 return [
                     'scale_measurement_id' => $measurement->scale_measurement_id,
                     'batch_number' => $measurement->batch_number,
+                    'machine_number' => $measurement->machine_number,
                     'measurement_date' => $measurement->measurement_date->format('Y-m-d'),
                     'weight' => $measurement->weight,
                     'status' => $measurement->status,
@@ -163,6 +164,7 @@ class ScaleMeasurementController extends Controller
             $validator = Validator::make($request->all(), [
                 'product_id' => 'required|string|exists:products,product_id',
                 'batch_number' => 'required|string|unique:scale_measurements,batch_number',
+                'machine_number' => 'nullable|string|max:255',
                 'measurement_date' => 'required|date',
                 'weight' => 'nullable|numeric|min:0',
                 'notes' => 'nullable|string|max:1000',
@@ -201,6 +203,7 @@ class ScaleMeasurementController extends Controller
             $measurement = ScaleMeasurement::create([
                 'product_id' => $product->id,
                 'batch_number' => $request->batch_number,
+                'machine_number' => $request->machine_number,
                 'measurement_date' => $request->measurement_date,
                 'weight' => $request->weight,
                 'status' => $status,
@@ -211,6 +214,7 @@ class ScaleMeasurementController extends Controller
             return $this->successResponse([
                 'scale_measurement_id' => $measurement->scale_measurement_id,
                 'batch_number' => $measurement->batch_number,
+                'machine_number' => $measurement->machine_number,
                 'measurement_date' => $measurement->measurement_date->format('Y-m-d'),
                 'weight' => $measurement->weight,
                 'status' => $measurement->status,
@@ -242,6 +246,7 @@ class ScaleMeasurementController extends Controller
             return $this->successResponse([
                 'scale_measurement_id' => $measurement->scale_measurement_id,
                 'batch_number' => $measurement->batch_number,
+                'machine_number' => $measurement->machine_number,
                 'measurement_date' => $measurement->measurement_date->format('Y-m-d'),
                 'weight' => $measurement->weight,
                 'status' => $measurement->status,
@@ -296,6 +301,7 @@ class ScaleMeasurementController extends Controller
             // Validate request
             $validator = Validator::make($request->all(), [
                 'batch_number' => "nullable|string|unique:scale_measurements,batch_number,{$measurement->id}",
+                'machine_number' => 'nullable|string|max:255',
                 'measurement_date' => 'nullable|date',
                 'weight' => 'nullable|numeric|min:0',
                 'notes' => 'nullable|string|max:1000',
@@ -311,6 +317,10 @@ class ScaleMeasurementController extends Controller
             // Update fields
             if ($request->has('batch_number')) {
                 $measurement->batch_number = $request->batch_number;
+            }
+
+            if ($request->has('machine_number')) {
+                $measurement->machine_number = $request->machine_number;
             }
 
             if ($request->has('measurement_date')) {
@@ -347,6 +357,7 @@ class ScaleMeasurementController extends Controller
             return $this->successResponse([
                 'scale_measurement_id' => $measurement->scale_measurement_id,
                 'batch_number' => $measurement->batch_number,
+                'machine_number' => $measurement->machine_number,
                 'measurement_date' => $measurement->measurement_date->format('Y-m-d'),
                 'weight' => $measurement->weight,
                 'status' => $measurement->status,
@@ -493,6 +504,7 @@ class ScaleMeasurementController extends Controller
                 'batch_number' => 'required_without:batch_numbers|string',
                 'batch_numbers' => 'required_without:batch_number|array',
                 'batch_numbers.*' => 'required|string',
+                'machine_number' => 'nullable|string|max:255',
                 'measurement_date' => 'required|date',
             ]);
 
@@ -565,6 +577,7 @@ class ScaleMeasurementController extends Controller
                 $measurement = ScaleMeasurement::create([
                     'product_id' => $product->id,
                     'batch_number' => $batchNumber,
+                    'machine_number' => $request->machine_number,
                     'measurement_date' => $request->measurement_date,
                     'weight' => null,
                     'status' => 'NOT_CHECKED',

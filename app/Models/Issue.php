@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\IssueStatus;
+use App\Enums\IssueCategory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -16,13 +17,17 @@ class Issue extends Model
         'issue_name',
         'description',
         'status',
+        'category',
         'created_by',
         'due_date',
+        'is_archived',
     ];
 
     protected $casts = [
         'status' => IssueStatus::class,
+        'category' => IssueCategory::class,
         'due_date' => 'date',
+        'is_archived' => 'boolean',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
     ];
@@ -81,6 +86,22 @@ class Issue extends Model
     public function scopeSolved($query)
     {
         return $query->where('status', IssueStatus::SOLVED);
+    }
+
+    /**
+     * Scope to filter archived issues
+     */
+    public function scopeArchived($query)
+    {
+        return $query->where('is_archived', true);
+    }
+
+    /**
+     * Scope to filter not archived issues
+     */
+    public function scopeNotArchived($query)
+    {
+        return $query->where('is_archived', false);
     }
 
     /**

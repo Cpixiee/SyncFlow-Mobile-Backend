@@ -65,6 +65,7 @@ Route::prefix('v1')->group(function () {
             Route::get('/progress', [ProductMeasurementController::class, 'getProgress']);
             Route::get('/progress-category', [ProductMeasurementController::class, 'getProgressCategory']);
             Route::get('/progress-all', [ProductMeasurementController::class, 'getProgressAll']);
+            Route::get('/overdue-banner', [ProductMeasurementController::class, 'getOverdueBanner']);
             Route::get('/available-products', [ProductMeasurementController::class, 'getAvailableProducts']);
             Route::get('/by-product', [ProductMeasurementController::class, 'getByProduct']);
             Route::post('/', [ProductMeasurementController::class, 'store']);
@@ -139,6 +140,10 @@ Route::prefix('v1')->group(function () {
             // All authenticated users can comment
             Route::post('/{id}/comments', [IssueController::class, 'addComment']);
             Route::delete('/{issueId}/comments/{commentId}', [IssueController::class, 'deleteComment']);
+
+            // Archive/Unarchive routes - available for authenticated users
+            Route::post('/{id}/archive', [IssueController::class, 'archive']);
+            Route::post('/{id}/unarchive', [IssueController::class, 'unarchive']);
 
             // Admin and SuperAdmin can CRUD issues
             Route::middleware('role:admin,superadmin')->group(function () {

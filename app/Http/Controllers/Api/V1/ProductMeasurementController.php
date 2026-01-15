@@ -291,6 +291,11 @@ class ProductMeasurementController extends Controller
             return 'TODO'; // No measurement created yet
         }
 
+        // Check if overdue first
+        if ($measurement->is_overdue) {
+            return 'OVERDUE';
+        }
+
         switch ($measurement->status) {
             case 'PENDING':
                 return 'TODO';
@@ -390,6 +395,7 @@ class ProductMeasurementController extends Controller
                 'due_date' => 'required|date|after_or_equal:today',
                 'measurement_type' => 'required|in:FULL_MEASUREMENT,SCALE_MEASUREMENT',
                 'batch_number' => 'nullable|string|max:255',
+                'machine_number' => 'nullable|string|max:255',
                 'sample_count' => 'nullable|integer|min:1|max:100',
                 'notes' => 'nullable|string|max:1000',
             ]);
@@ -424,6 +430,7 @@ class ProductMeasurementController extends Controller
                     $measurement = ProductMeasurement::create([
                         'product_id' => $product->id,
                         'batch_number' => $batchNumber,
+                        'machine_number' => $request->machine_number,
                         'sample_count' => $sampleCount,
                         'measurement_type' => $request->measurement_type,
                         'status' => 'PENDING',
@@ -451,6 +458,7 @@ class ProductMeasurementController extends Controller
             $measurement = ProductMeasurement::create([
                 'product_id' => $product->id,
                 'batch_number' => $batchNumber,
+                'machine_number' => $request->machine_number,
                 'sample_count' => $sampleCount,
                 'measurement_type' => $request->measurement_type,
                 'status' => 'PENDING',
@@ -663,6 +671,7 @@ class ProductMeasurementController extends Controller
         try {
             $validator = Validator::make($request->all(), [
                 'batch_number' => 'required|string|max:255',
+                'machine_number' => 'nullable|string|max:255',
             ]);
 
             if ($validator->fails()) {
@@ -690,15 +699,22 @@ class ProductMeasurementController extends Controller
                 );
             }
 
-            // Update batch_number dan status
-            $measurement->update([
+            // Update batch_number, machine_number dan status
+            $updateData = [
                 'batch_number' => $request->batch_number,
                 'status' => 'IN_PROGRESS', // Status berubah dari TODO ke IN_PROGRESS
-            ]);
+            ];
+            
+            if ($request->has('machine_number')) {
+                $updateData['machine_number'] = $request->machine_number;
+            }
+            
+            $measurement->update($updateData);
 
             return $this->successResponse([
                 'measurement_id' => $measurement->measurement_id,
                 'batch_number' => $measurement->batch_number,
+                'machine_number' => $measurement->machine_number,
                 'status' => $measurement->status,
             ], 'Batch number set successfully');
 
@@ -4461,6 +4477,51 @@ class ProductMeasurementController extends Controller
             foreach ($recipients as $user) {
                 Notification::createProductOutOfSpec($user->id, $measurement, $outOfSpecItems);
             }
+        }
+    }
+
+    /**
+     * Get overdue measurements for banner info
+     * GET /api/v1/product-measurement/overdue-banner
+     */
+    public function getOverdueBanner(Request $request)
+    {
+        try {
+            $user = JWTAuth::parseToken()->authenticate();
+            
+            if (!$user) {
+                return $this->unauthorizedResponse('User not authenticated');
+            }
+
+            // Get overdue measurements
+            $overdueMeasurements = ProductMeasurement::overdue()
+                ->with('product:id,product_id,product_name')
+                ->orderBy('due_date', 'asc')
+                ->get()
+                ->map(function ($measurement) {
+                    return [
+                        'measurement_id' => $measurement->measurement_id,
+                        'product_name' => $measurement->product->product_name ?? 'N/A',
+                        'batch_number' => $measurement->batch_number,
+                        'machine_number' => $measurement->machine_number,
+                        'due_date' => $measurement->due_date->format('Y-m-d'),
+                        'days_overdue' => $measurement->due_date->diffInDays(now()),
+                        'status' => $measurement->status,
+                    ];
+                });
+
+            return $this->successResponse([
+                'has_overdue' => $overdueMeasurements->isNotEmpty(),
+                'overdue_count' => $overdueMeasurements->count(),
+                'overdue_measurements' => $overdueMeasurements->values(),
+            ], 'Overdue measurements retrieved successfully');
+
+        } catch (\Exception $e) {
+            return $this->errorResponse(
+                'Error getting overdue measurements: ' . $e->getMessage(),
+                'OVERDUE_MEASUREMENTS_ERROR',
+                500
+            );
         }
     }
 }

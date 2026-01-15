@@ -17,6 +17,7 @@ class ProductMeasurement extends Model
         'measurement_id',
         'product_id',
         'batch_number',
+        'machine_number',
         'sample_count',
         'measurement_type',
         'status',
@@ -82,6 +83,28 @@ class ProductMeasurement extends Model
         } while (self::where('measurement_id', $measurementId)->exists());
 
         return $measurementId;
+    }
+
+    /**
+     * Check if measurement is overdue
+     */
+    public function getIsOverdueAttribute(): bool
+    {
+        if (!$this->due_date) {
+            return false;
+        }
+        
+        return $this->due_date < now() 
+            && !in_array($this->status, ['COMPLETED', 'CANCELLED']);
+    }
+
+    /**
+     * Scope untuk filter overdue measurements
+     */
+    public function scopeOverdue($query)
+    {
+        return $query->where('due_date', '<', now())
+            ->whereNotIn('status', ['COMPLETED', 'CANCELLED']);
     }
 
     /**

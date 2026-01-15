@@ -475,25 +475,106 @@ class ReportController extends Controller
                 // Merge data ke master file - use Storage path for correct disk location
                 // Disk 'local' root is storage/app/private, so filePath is relative to that
                 $masterFilePath = storage_path('app/private/' . $masterFile->file_path);
-                $spreadsheet = ReportExcelHelper::mergeDataToMasterFile($masterFilePath, $dataRows, 'raw_data');
-                $filename = pathinfo($masterFile->original_filename, PATHINFO_FILENAME) . '.xlsx';
+                
+                // Check if file exists and is readable
+                if (!file_exists($masterFilePath)) {
+                    Log::error('Master file not found: ' . $masterFilePath);
+                    return $this->errorResponse(
+                        'Master file tidak ditemukan di storage. Silakan upload ulang.',
+                        'MASTER_FILE_NOT_FOUND',
+                        404
+                    );
+                }
+                
+                if (!is_readable($masterFilePath)) {
+                    Log::error('Master file not readable: ' . $masterFilePath);
+                    return $this->errorResponse(
+                        'Master file tidak dapat dibaca. Cek permission file.',
+                        'MASTER_FILE_NOT_READABLE',
+                        500
+                    );
+                }
+                
+                try {
+                    $spreadsheet = ReportExcelHelper::mergeDataToMasterFile($masterFilePath, $dataRows, 'raw_data');
+                    $filename = pathinfo($masterFile->original_filename, PATHINFO_FILENAME) . '.xlsx';
+                } catch (\PhpOffice\PhpSpreadsheet\Exception $e) {
+                    Log::error('Excel processing error: ' . $e->getMessage());
+                    Log::error('Stack trace: ' . $e->getTraceAsString());
+                    return $this->errorResponse(
+                        'Error processing Excel file: ' . $e->getMessage(),
+                        'EXCEL_PROCESSING_ERROR',
+                        500
+                    );
+                }
             } else {
                 // Create new Excel file
-                $spreadsheet = ReportExcelHelper::createExcelFile($dataRows, 'raw_data');
-                $filename = 'raw_data.xlsx';
+                try {
+                    $spreadsheet = ReportExcelHelper::createExcelFile($dataRows, 'raw_data');
+                    $filename = 'raw_data.xlsx';
+                } catch (\Exception $e) {
+                    Log::error('Excel creation error: ' . $e->getMessage());
+                    Log::error('Stack trace: ' . $e->getTraceAsString());
+                    return $this->errorResponse(
+                        'Error creating Excel file: ' . $e->getMessage(),
+                        'EXCEL_CREATION_ERROR',
+                        500
+                    );
+                }
             }
 
             // Write to temporary file
             $tempPath = storage_path('app/temp_' . time() . '.xlsx');
-            $writer = new Xlsx($spreadsheet);
-            $writer->save($tempPath);
-
-            // Return file download
-            return response()->download($tempPath, $filename, [
-                'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            ])->deleteFileAfterSend(true);
+            
+            // Ensure temp directory exists
+            $tempDir = dirname($tempPath);
+            if (!is_dir($tempDir)) {
+                mkdir($tempDir, 0755, true);
+            }
+            
+            try {
+                $writer = new Xlsx($spreadsheet);
+                $writer->save($tempPath);
+                
+                // Check if file was created successfully
+                if (!file_exists($tempPath)) {
+                    Log::error('Temp file was not created: ' . $tempPath);
+                    return $this->errorResponse(
+                        'Error creating temporary file for download',
+                        'TEMP_FILE_CREATION_ERROR',
+                        500
+                    );
+                }
+                
+                // Return file download
+                return response()->download($tempPath, $filename, [
+                    'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                ])->deleteFileAfterSend(true);
+            } catch (\PhpOffice\PhpSpreadsheet\Writer\Exception $e) {
+                Log::error('Excel writer error: ' . $e->getMessage());
+                Log::error('Stack trace: ' . $e->getTraceAsString());
+                return $this->errorResponse(
+                    'Error writing Excel file: ' . $e->getMessage(),
+                    'EXCEL_WRITER_ERROR',
+                    500
+                );
+            }
+        } catch (\PhpOffice\PhpSpreadsheet\Exception $e) {
+            Log::error('Excel processing error: ' . $e->getMessage());
+            Log::error('Stack trace: ' . $e->getTraceAsString());
+            return $this->errorResponse(
+                'Error processing Excel file: ' . $e->getMessage(),
+                'EXCEL_PROCESSING_ERROR',
+                500
+            );
         } catch (\Exception $e) {
-            return $this->errorResponse('Error downloading Excel: ' . $e->getMessage(), 'EXCEL_DOWNLOAD_ERROR', 500);
+            Log::error('Download Excel error: ' . $e->getMessage());
+            Log::error('Stack trace: ' . $e->getTraceAsString());
+            return $this->errorResponse(
+                'Error downloading Excel: ' . $e->getMessage(),
+                'EXCEL_DOWNLOAD_ERROR',
+                500
+            );
         }
     }
 
