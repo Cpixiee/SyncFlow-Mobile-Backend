@@ -435,11 +435,17 @@ class ProductMeasurementController extends Controller
                         'measurement_type' => $request->measurement_type,
                         'status' => 'PENDING',
                         'measured_by' => $user->id,
-                        'measured_at' => $request->due_date,
+                        'due_date' => $request->due_date,
+                        'measured_at' => null,
                         'notes' => $request->notes,
                     ]);
 
                     $results[$product->product_id] = $measurement->measurement_id;
+
+                    // ✅ NEW: Auto-create quarterly targets untuk FULL_MEASUREMENT
+                    if ($request->measurement_type === 'FULL_MEASUREMENT') {
+                        $this->createQuarterlyTargets($product, $request->due_date, $request->measurement_type, $user, $batchNumber, $request->machine_number, $sampleCount, $request->notes);
+                    }
                 }
 
                 return $this->successResponse($results, 'Measurement entries created successfully', 201);
@@ -463,9 +469,15 @@ class ProductMeasurementController extends Controller
                 'measurement_type' => $request->measurement_type,
                 'status' => 'PENDING',
                 'measured_by' => $user->id,
-                'measured_at' => $request->due_date,
+                'due_date' => $request->due_date,
+                'measured_at' => null,
                 'notes' => $request->notes,
             ]);
+
+            // ✅ NEW: Auto-create quarterly targets untuk FULL_MEASUREMENT
+            if ($request->measurement_type === 'FULL_MEASUREMENT') {
+                $this->createQuarterlyTargets($product, $request->due_date, $request->measurement_type, $user, $batchNumber, $request->machine_number, $sampleCount, $request->notes);
+            }
 
             return $this->successResponse([
                 'product_measurement_id' => $measurement->measurement_id,
@@ -535,6 +547,11 @@ class ProductMeasurementController extends Controller
                 ]);
 
                 $results[$product->product_id] = $measurement->measurement_id;
+
+                // ✅ NEW: Auto-create quarterly targets untuk FULL_MEASUREMENT
+                if ($request->measurement_type === 'FULL_MEASUREMENT') {
+                    $this->createQuarterlyTargets($product, $request->due_date, $request->measurement_type, $user, null, null, ($product->measurement_points[0]['setup']['sample_amount'] ?? 3), null);
+                }
             }
 
             return $this->successResponse($results, 'Bulk measurements created successfully', 201);
@@ -3512,41 +3529,39 @@ class ProductMeasurementController extends Controller
                 ];
             }
 
-            // ✅ FIX: Calculate overall summary with clear metrics
+            // ✅ FIX: Calculate overall summary - ambil dari measurement item dengan sample terbanyak
             $maxSampleCount = 0;
-            $totalEvaluatedSamples = 0; // Total samples yang di-evaluate (not SKIP_CHECK)
             $totalMeasurementItems = count($measurementPointResults);
+            $itemWithMaxSamples = null;
             
+            // Find measurement item dengan sample terbanyak
             foreach ($measurementPointResults as $pointResult) {
                 $sampleAmount = $pointResult['summary']['sample_amount'] ?? 0;
                 
                 // Track max sample count
                 if ($sampleAmount > $maxSampleCount) {
                     $maxSampleCount = $sampleAmount;
-                }
-                
-                // Check if this measurement point is SKIP_CHECK
-                $itemNameId = $pointResult['name_id'] ?? null;
-                $isSkipCheck = false;
-                if ($itemNameId && isset($measurementPointMap[$itemNameId])) {
-                    $point = $measurementPointMap[$itemNameId];
-                    $evaluationType = $point['evaluation_type'] ?? null;
-                    $isSkipCheck = ($evaluationType === 'SKIP_CHECK');
-                }
-                
-                // Only count samples that were evaluated (not SKIP_CHECK)
-                if (!$isSkipCheck) {
-                    $totalEvaluatedSamples += $sampleAmount;
+                    $itemWithMaxSamples = $pointResult;
                 }
             }
             
+            // Jika ada item dengan max samples, ambil ok/ng dari item tersebut
+            $totalSamples = $maxSampleCount;
+            $summaryOk = 0;
+            $summaryNg = 0;
+            
+            if ($itemWithMaxSamples) {
+                $summaryOk = $itemWithMaxSamples['summary']['ok'] ?? 0;
+                $summaryNg = $itemWithMaxSamples['summary']['ng'] ?? 0;
+            }
+            
             $summary = [
-                'total_measurement_items' => $totalMeasurementItems, // ✅ NEW: Total measurement items
-                'max_sample_count' => $maxSampleCount, // ✅ RENAMED: Max sample count dari semua measurement items
-                'total_samples' => $totalEvaluatedSamples, // ✅ NEW: Total samples yang di-evaluate
-                'ok' => $okCount,
-                'ng' => $ngCount,
-                'ng_ratio' => $totalEvaluatedSamples > 0 ? ($ngCount / $totalEvaluatedSamples) * 100 : 0,
+                'total_measurement_items' => $totalMeasurementItems,
+                'max_sample_count' => $maxSampleCount,
+                'total_samples' => $totalSamples, // ✅ FIX: Diambil dari measurement item dengan sample terbanyak
+                'ok' => $summaryOk,                 // ✅ FIX: OK dari measurement item dengan sample terbanyak
+                'ng' => $summaryNg,                 // ✅ FIX: NG dari measurement item dengan sample terbanyak
+                'ng_ratio' => $totalSamples > 0 ? ($summaryNg / $totalSamples) * 100 : 0,
             ];
 
             // ✅ FIX: Determine status correctly for COMPLETED measurements
@@ -4522,6 +4537,85 @@ class ProductMeasurementController extends Controller
                 'OVERDUE_MEASUREMENTS_ERROR',
                 500
             );
+        }
+    }
+
+    /**
+     * ✅ NEW: Auto-create quarterly targets untuk quarter berikutnya
+     * Logic: Jika buat target di Q1, auto-create Q2, Q3, Q4
+     * Jika buat di Q2, auto-create Q3, Q4
+     * Jika buat di Q3, auto-create Q4
+     * Jika buat di Q4, hanya Q4 saja
+     */
+    private function createQuarterlyTargets(Product $product, string $originalDueDate, string $measurementType, $user, ?string $batchNumber = null, ?string $machineNumber = null, ?int $sampleCount = null, ?string $notes = null): void
+    {
+        // Parse original due date
+        $originalDate = \Carbon\Carbon::parse($originalDueDate);
+        $year = $originalDate->year;
+        $month = $originalDate->month;
+        $day = $originalDate->day;
+
+        // Determine current quarter dari month
+        $currentQuarter = null;
+        if ($month >= 1 && $month <= 3) {
+            $currentQuarter = 1; // Q1
+        } elseif ($month >= 4 && $month <= 6) {
+            $currentQuarter = 2; // Q2
+        } elseif ($month >= 7 && $month <= 9) {
+            $currentQuarter = 3; // Q3
+        } else {
+            $currentQuarter = 4; // Q4
+        }
+
+        // Determine quarters to create (next quarters only)
+        $quartersToCreate = [];
+        if ($currentQuarter === 1) {
+            $quartersToCreate = [2, 3, 4]; // Q2, Q3, Q4
+        } elseif ($currentQuarter === 2) {
+            $quartersToCreate = [3, 4]; // Q3, Q4
+        } elseif ($currentQuarter === 3) {
+            $quartersToCreate = [4]; // Q4
+        }
+        // If Q4, no quarters to create
+
+        // Get sample count from product if not provided
+        if ($sampleCount === null) {
+            $measurementPoints = $product->measurement_points ?? [];
+            $sampleCount = count($measurementPoints) > 0 ? ($measurementPoints[0]['setup']['sample_amount'] ?? 3) : 3;
+        }
+
+        // Create targets for each quarter
+        foreach ($quartersToCreate as $targetQuarter) {
+            // Calculate target date: original date + (targetQuarter - currentQuarter) * 3 months
+            $monthsToAdd = ($targetQuarter - $currentQuarter) * 3;
+            $targetDate = $originalDate->copy()->addMonths($monthsToAdd);
+
+            // Check if target already exists for this quarter (skip if exists)
+            $quarterRange = $this->getQuarterRangeFromQuarterNumber($targetQuarter, $targetDate->year);
+            $existingMeasurement = ProductMeasurement::where('product_id', $product->id)
+                ->where('measurement_type', $measurementType)
+                ->whereBetween('due_date', [$quarterRange['start'], $quarterRange['end']])
+                ->first();
+
+            // Skip if target already exists
+            if ($existingMeasurement) {
+                continue;
+            }
+
+            // Create new target
+            ProductMeasurement::create([
+                'product_id' => $product->id,
+                'batch_number' => $batchNumber, // Can be null for bulk create
+                'machine_number' => $machineNumber,
+                'sample_count' => $sampleCount,
+                'measurement_type' => $measurementType,
+                'status' => 'TODO',
+                'sample_status' => 'NOT_COMPLETE',
+                'measured_by' => $user->id,
+                'due_date' => $targetDate->format('Y-m-d H:i:s'),
+                'measured_at' => null,
+                'notes' => $notes,
+            ]);
         }
     }
 }

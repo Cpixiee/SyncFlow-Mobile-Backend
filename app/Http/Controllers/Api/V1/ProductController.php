@@ -364,7 +364,6 @@ class ProductController extends Controller
                 'id' => $product->product_id,
                 'basic_info' => [
                     'product_category_id' => $product->product_category_id,
-                    'product_category_name' => $product->productCategory->name ?? null,
                     'product_name' => $product->product_name,
                     'product_spec_name' => $product->product_spec_name,
                     'ref_spec_number' => $product->ref_spec_number,
@@ -799,23 +798,19 @@ class ProductController extends Controller
                 return $this->notFoundResponse('Product tidak ditemukan');
             }
 
-            // Check if product has any measurements
-            $hasProductMeasurements = $product->productMeasurements()->exists();
-            $hasScaleMeasurements = $product->scaleMeasurements()->exists();
+            // ✅ NEW: Delete related data (cascade delete)
+            // Delete product measurements dan turunannya
+            $product->productMeasurements()->delete();
             
-            if ($hasProductMeasurements || $hasScaleMeasurements) {
-                return $this->errorResponse(
-                    'Product tidak dapat dihapus karena sudah memiliki measurement data',
-                    'PRODUCT_HAS_MEASUREMENTS',
-                    400
-                );
-            }
+            // Delete scale measurements
+            $product->scaleMeasurements()->delete();
 
+            // Delete product
             $product->delete();
 
             return $this->successResponse(
                 ['deleted' => true],
-                'Product berhasil dihapus'
+                'Product dan data terkait berhasil dihapus'
             );
 
         } catch (\Exception $e) {
@@ -931,6 +926,10 @@ class ProductController extends Controller
 
             // Update measurement points jika ada
             if ($request->has('measurement_points')) {
+                // ✅ NEW: Delete related data sebelum update (supaya tidak ada data yang broken)
+                $product->productMeasurements()->delete();
+                $product->scaleMeasurements()->delete();
+
                 $measurementPoints = $request->input('measurement_points');
                 
                 // Auto-generate name_id if not provided
