@@ -1,10 +1,10 @@
-# Update: Auto-Create Quarterly Targets & Summary Logic Fix
+# Update: Auto-Create Quarterly Targets & Related Improvements
 
 **Tanggal:** 16 Januari 2026
 
 ## Ringkasan Perubahan
 
-Implementasi fitur auto-create quarterly targets dan perbaikan logic summary di result endpoint.
+Implementasi fitur auto-create quarterly targets, cascade delete untuk product, delete related data sebelum update, dan perbaikan logic summary di result endpoint.
 
 ---
 
@@ -26,6 +26,11 @@ Admin membuat target untuk produk "Civuvas 7.5 G" di Q1 pada tanggal **15 Januar
 - **Q3**: 15 Juli 2026 (Jan + 6 bulan)
 - **Q4**: 15 Oktober 2026 (Jan + 9 bulan)
 
+### Ketentuan
+- ✅ Hanya berlaku untuk **FULL_MEASUREMENT** (tidak untuk SCALE_MEASUREMENT)
+- ✅ Jika target untuk quarter tertentu sudah ada, akan di-skip (tidak overwrite)
+- ✅ Berlaku untuk single create (`store()`) dan bulk create (`bulkStore()`)
+
 ### Implementasi
 - **File**: `app/Http/Controllers/Api/V1/ProductMeasurementController.php`
 - **Methods**: 
@@ -33,155 +38,56 @@ Admin membuat target untuk produk "Civuvas 7.5 G" di Q1 pada tanggal **15 Januar
   - `bulkStore()` - Bulk product targets creation
   - `createQuarterlyTargets()` - Helper method untuk auto-create (NEW)
 
-### Ketentuan
-- ✅ Hanya berlaku untuk **FULL_MEASUREMENT** (tidak untuk SCALE_MEASUREMENT)
-- ✅ Jika target untuk quarter tertentu sudah ada, akan di-skip (tidak overwrite)
-- ✅ Berlaku untuk single create (`store()`) dan bulk create (`bulkStore()`)
+---
 
-### Code Implementation
+## 2. Cascade Delete untuk Product
 
-#### Method Helper: `createQuarterlyTargets()`
-```php
-/**
- * Auto-create quarterly targets untuk quarter berikutnya
- * Logic: Jika buat target di Q1, auto-create Q2, Q3, Q4
- * Jika buat di Q2, auto-create Q3, Q4
- * Jika buat di Q3, auto-create Q4
- * Jika buat di Q4, hanya Q4 saja
- */
-private function createQuarterlyTargets(
-    Product $product, 
-    string $originalDueDate, 
-    string $measurementType, 
-    $user, 
-    ?string $batchNumber = null, 
-    ?string $machineNumber = null, 
-    ?int $sampleCount = null, 
-    ?string $notes = null
-): void
-{
-    // Parse original due date
-    $originalDate = \Carbon\Carbon::parse($originalDueDate);
-    $year = $originalDate->year;
-    $month = $originalDate->month;
-    $day = $originalDate->day;
+### Deskripsi
+Ketika product dihapus, semua data terkait (product measurements dan scale measurements) juga ikut terhapus secara otomatis.
 
-    // Determine current quarter dari month
-    $currentQuarter = null;
-    if ($month >= 1 && $month <= 3) {
-        $currentQuarter = 1; // Q1
-    } elseif ($month >= 4 && $month <= 6) {
-        $currentQuarter = 2; // Q2
-    } elseif ($month >= 7 && $month <= 9) {
-        $currentQuarter = 3; // Q3
-    } else {
-        $currentQuarter = 4; // Q4
-    }
+### Perubahan
+**Sebelum:**
+- Product tidak bisa dihapus jika sudah memiliki measurement data
+- Error message: "Product tidak dapat dihapus karena sudah memiliki measurement data"
 
-    // Determine quarters to create (next quarters only)
-    $quartersToCreate = [];
-    if ($currentQuarter === 1) {
-        $quartersToCreate = [2, 3, 4]; // Q2, Q3, Q4
-    } elseif ($currentQuarter === 2) {
-        $quartersToCreate = [3, 4]; // Q3, Q4
-    } elseif ($currentQuarter === 3) {
-        $quartersToCreate = [4]; // Q4
-    }
-    // If Q4, no quarters to create
+**Sesudah:**
+- Product bisa dihapus, dan semua data terkait ikut terhapus
+- Cascade delete untuk:
+  - `product_measurements` (dan turunannya)
+  - `scale_measurements`
 
-    // Get sample count from product if not provided
-    if ($sampleCount === null) {
-        $measurementPoints = $product->measurement_points ?? [];
-        $sampleCount = count($measurementPoints) > 0 ? ($measurementPoints[0]['setup']['sample_amount'] ?? 3) : 3;
-    }
-
-    // Create targets for each quarter
-    foreach ($quartersToCreate as $targetQuarter) {
-        // Calculate target date: original date + (targetQuarter - currentQuarter) * 3 months
-        $monthsToAdd = ($targetQuarter - $currentQuarter) * 3;
-        $targetDate = $originalDate->copy()->addMonths($monthsToAdd);
-
-        // Check if target already exists for this quarter (skip if exists)
-        $quarterRange = $this->getQuarterRangeFromQuarterNumber($targetQuarter, $targetDate->year);
-        $existingMeasurement = ProductMeasurement::where('product_id', $product->id)
-            ->where('measurement_type', $measurementType)
-            ->whereBetween('due_date', [$quarterRange['start'], $quarterRange['end']])
-            ->first();
-
-        // Skip if target already exists
-        if ($existingMeasurement) {
-            continue;
-        }
-
-        // Create new target
-        ProductMeasurement::create([
-            'product_id' => $product->id,
-            'batch_number' => $batchNumber, // Can be null for bulk create
-            'machine_number' => $machineNumber,
-            'sample_count' => $sampleCount,
-            'measurement_type' => $measurementType,
-            'status' => 'TODO',
-            'sample_status' => 'NOT_COMPLETE',
-            'measured_by' => $user->id,
-            'due_date' => $targetDate->format('Y-m-d H:i:s'),
-            'measured_at' => null,
-            'notes' => $notes,
-        ]);
-    }
-}
-```
-
-#### Integration di `store()` method
-```php
-// Single product flow
-$measurement = ProductMeasurement::create([...]);
-
-// ✅ NEW: Auto-create quarterly targets untuk FULL_MEASUREMENT
-if ($request->measurement_type === 'FULL_MEASUREMENT') {
-    $this->createQuarterlyTargets(
-        $product, 
-        $request->due_date, 
-        $request->measurement_type, 
-        $user, 
-        $batchNumber, 
-        $request->machine_number, 
-        $sampleCount, 
-        $request->notes
-    );
-}
-```
-
-#### Integration di `bulkStore()` method
-```php
-foreach ($products as $product) {
-    $measurement = ProductMeasurement::create([...]);
-    
-    // ✅ NEW: Auto-create quarterly targets untuk FULL_MEASUREMENT
-    if ($request->measurement_type === 'FULL_MEASUREMENT') {
-        $this->createQuarterlyTargets(
-            $product, 
-            $request->due_date, 
-            $request->measurement_type, 
-            $user, 
-            null, // batch_number null untuk bulk
-            null, // machine_number null untuk bulk
-            ($product->measurement_points[0]['setup']['sample_amount'] ?? 3), 
-            null  // notes null untuk bulk
-        );
-    }
-}
-```
+### Implementasi
+- **File**: `app/Http/Controllers/Api/V1/ProductController.php`
+- **Method**: `destroy()`
 
 ---
 
-## 2. Fix Logic Summary di Result Endpoint
+## 3. Delete Related Data Sebelum Update Product
+
+### Deskripsi
+Ketika user melakukan update product (terutama measurement_points), sistem akan terlebih dahulu menghapus data terkait untuk menghindari data yang broken akibat perubahan struktur measurement points.
+
+### Perubahan
+**Sebelum:**
+- Update measurement_points langsung tanpa menghapus data terkait
+- Berpotensi menyebabkan data broken jika struktur measurement points berubah
+
+**Sesudah:**
+- Sebelum update measurement_points, sistem akan menghapus:
+  - `product_measurements` (dan turunannya)
+  - `scale_measurements`
+- Kemudian baru melakukan update measurement_points
+
+### Implementasi
+- **File**: `app/Http/Controllers/Api/V1/ProductController.php`
+- **Method**: `update()`
+
+---
+
+## 4. Fix Logic Summary di Result Endpoint
 
 ### Deskripsi
 Perbaikan logic perhitungan summary di endpoint `GET /api/v1/product-measurement/:id/result`. Summary sekarang diambil dari measurement item dengan sample terbanyak, bukan dari agregasi semua measurement items.
-
-### Implementasi
-- **File**: `app/Http/Controllers/Api/V1/ProductMeasurementController.php`
-- **Method**: `getResult()`
 
 ### Perubahan Logic
 
@@ -232,43 +138,9 @@ Dengan data measurement results:
 }
 ```
 
-### Code Implementation
-```php
-// ✅ FIX: Calculate overall summary - ambil dari measurement item dengan sample terbanyak
-$maxSampleCount = 0;
-$totalMeasurementItems = count($measurementPointResults);
-$itemWithMaxSamples = null;
-
-// Find measurement item dengan sample terbanyak
-foreach ($measurementPointResults as $pointResult) {
-    $sampleAmount = $pointResult['summary']['sample_amount'] ?? 0;
-    
-    // Track max sample count
-    if ($sampleAmount > $maxSampleCount) {
-        $maxSampleCount = $sampleAmount;
-        $itemWithMaxSamples = $pointResult;
-    }
-}
-
-// Jika ada item dengan max samples, ambil ok/ng dari item tersebut
-$totalSamples = $maxSampleCount;
-$summaryOk = 0;
-$summaryNg = 0;
-
-if ($itemWithMaxSamples) {
-    $summaryOk = $itemWithMaxSamples['summary']['ok'] ?? 0;
-    $summaryNg = $itemWithMaxSamples['summary']['ng'] ?? 0;
-}
-
-$summary = [
-    'total_measurement_items' => $totalMeasurementItems,
-    'max_sample_count' => $maxSampleCount,
-    'total_samples' => $totalSamples, // ✅ FIX: Diambil dari measurement item dengan sample terbanyak
-    'ok' => $summaryOk,                 // ✅ FIX: OK dari measurement item dengan sample terbanyak
-    'ng' => $summaryNg,                 // ✅ FIX: NG dari measurement item dengan sample terbanyak
-    'ng_ratio' => $totalSamples > 0 ? ($summaryNg / $totalSamples) * 100 : 0,
-];
-```
+### Implementasi
+- **File**: `app/Http/Controllers/Api/V1/ProductMeasurementController.php`
+- **Method**: `getResult()`
 
 ---
 
@@ -305,17 +177,26 @@ $summary = [
    - Create bulk targets untuk multiple products
    - Verify: Auto-create berlaku untuk semua products
 
+### Test Cases untuk Cascade Delete
+
+1. **Test Delete Product dengan Measurements**
+   - Create product dengan measurements
+   - Delete product
+   - Verify: Product dan semua measurements terhapus
+
+### Test Cases untuk Update Product
+
+1. **Test Update Measurement Points**
+   - Create product dengan measurements
+   - Update measurement_points
+   - Verify: Old measurements terhapus, product terupdate
+
 ### Test Cases untuk Summary Logic
 
 1. **Test Summary dari Item dengan Max Samples**
    - Create measurement dengan multiple items (berbeda sample count)
    - Get result
    - Verify: Summary diambil dari item dengan sample terbanyak
-
-2. **Test Multiple Items dengan Same Max Samples**
-   - Create measurement dengan multiple items yang memiliki sample count sama (max)
-   - Get result
-   - Verify: Summary diambil dari item pertama yang ditemukan dengan max samples
 
 ---
 
@@ -325,6 +206,8 @@ $summary = [
 Semua perubahan dilakukan di endpoint yang sudah ada:
 - `POST /api/v1/product-measurement` - Auto-create quarterly targets
 - `POST /api/v1/product-measurement/bulk` - Auto-create quarterly targets (bulk)
+- `DELETE /api/v1/products/{productId}` - Cascade delete
+- `PUT /api/v1/products/{productId}` - Delete related data sebelum update
 - `GET /api/v1/product-measurement/{id}/result` - Summary logic fix
 
 ---
@@ -341,7 +224,9 @@ Semua perubahan adalah logic changes, tidak ada perubahan struktur database.
 ### Tidak Ada Breaking Changes
 Semua perubahan backward compatible:
 - Auto-create quarterly targets adalah fitur baru (tidak mengubah behavior existing)
-- Summary logic fix adalah perbaikan (response structure tetap sama, hanya logic perhitungan yang berubah)
+- Cascade delete adalah improvement (sebelumnya product tidak bisa dihapus)
+- Delete related data sebelum update adalah improvement (menghindari broken data)
+- Summary logic fix adalah perbaikan (response structure tetap sama)
 
 ---
 
@@ -353,11 +238,17 @@ Semua perubahan backward compatible:
    - Modified: `bulkStore()` method
    - Modified: `getResult()` method (summary logic)
 
+2. `app/Http/Controllers/Api/V1/ProductController.php`
+   - Modified: `destroy()` method (cascade delete)
+   - Modified: `update()` method (delete related data)
+
 ---
 
 ## Notes
 
 - Auto-create quarterly targets hanya berlaku untuk **FULL_MEASUREMENT**
 - Jika target untuk quarter tertentu sudah ada, akan di-skip (tidak overwrite)
+- Cascade delete menghapus semua data terkait secara permanen
+- Delete related data sebelum update menghindari broken data akibat perubahan struktur
 - Summary diambil dari measurement item dengan sample terbanyak, bukan agregasi semua items
 - Tanggal target di quarter berikutnya dihitung dengan menambahkan 3 bulan per quarter dari tanggal original
