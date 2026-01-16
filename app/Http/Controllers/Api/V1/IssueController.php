@@ -252,12 +252,15 @@ class IssueController extends Controller
                 return $this->notFoundResponse('Issue not found');
             }
 
+            // Build validation rules
+            // Note: due_date validation removed 'after_or_equal:today' to allow status updates
+            // without requiring due_date to be today or later (e.g., updating status to SOLVED for past due dates)
             $validator = Validator::make($request->all(), [
                 'issue_name' => 'nullable|string|max:255',
                 'description' => 'nullable|string',
                 'status' => ['nullable', new Enum(IssueStatus::class)],
                 'category' => ['nullable', new Enum(IssueCategory::class)],
-                'due_date' => 'nullable|date|after_or_equal:today',
+                'due_date' => 'nullable|date', // Removed 'after_or_equal:today' to allow status updates
             ]);
 
             if ($validator->fails()) {
