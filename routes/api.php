@@ -192,6 +192,7 @@ Route::prefix('v1')->group(function () {
             Route::get('/data', [\App\Http\Controllers\Api\V1\ReportController::class, 'getReportData']);
             
             // Upload master file (all authenticated users can upload)
+            Route::get('/upload-master', [\App\Http\Controllers\Api\V1\ReportController::class, 'getMasterTemplate']);
             Route::post('/upload-master', [\App\Http\Controllers\Api\V1\ReportController::class, 'uploadMasterFile']);
             
             // Download endpoints
