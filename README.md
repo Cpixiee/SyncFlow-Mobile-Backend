@@ -777,6 +777,27 @@ php artisan make:test ExampleTest
 
 ## 🚢 Deployment
 
+### Windows Server Deployment
+
+Untuk deployment di Windows Server, gunakan automation script yang sudah disediakan:
+
+**Quick Start:**
+```powershell
+# Jalankan automation script
+.\setup-deploy.ps1
+```
+
+Script akan otomatis:
+- ✅ Mengecek dan install dependencies (PHP, Composer, MySQL)
+- ✅ Setup environment configuration
+- ✅ Install Composer packages
+- ✅ Run database migrations
+- ✅ Run database seeders (semua 6 seeder)
+- ✅ Optimize Laravel untuk production
+- ✅ Setup storage directories
+
+**Dokumentasi Lengkap:** Lihat [WINDOWS_DEPLOYMENT.md](WINDOWS_DEPLOYMENT.md) untuk panduan detail.
+
 ### Production Setup
 
 1. **Set environment to production**
