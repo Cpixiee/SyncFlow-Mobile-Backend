@@ -569,12 +569,12 @@ class AuthController extends Controller
 
             // Validation rules
             $validationRules = [
-                'username' => "nullable|string|unique:login_users,username,{$targetUser->id}",
+                'username' => "nullable|string|unique:login_users,username,{$targetUser->id},id",
                 'photo_url' => 'nullable|string', // Accept URL or relative path like /storage/filename.jpg
                 'phone' => 'nullable|string',
-                'email' => "nullable|email|unique:login_users,email,{$targetUser->id}",
+                'email' => "nullable|email|unique:login_users,email,{$targetUser->id},id",
                 // ✅ NEW: Allow user to update their own employee_id (must stay unique)
-                'employee_id' => "nullable|string|unique:login_users,employee_id,{$targetUser->id}",
+                'employee_id' => "nullable|string|unique:login_users,employee_id,{$targetUser->id},id",
             ];
 
             $validator = Validator::make($request->all(), $validationRules);
