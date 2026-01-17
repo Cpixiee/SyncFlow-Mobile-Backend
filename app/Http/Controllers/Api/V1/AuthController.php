@@ -544,7 +544,9 @@ class AuthController extends Controller
     }
 
     /**
-     * Update user information (only own data).
+     * Update user information.
+     * - Regular users can only update their own data
+     * - Superadmin can update role of other users by providing user_id and role
      *
      * @param Request $request
      * @return JsonResponse
@@ -559,21 +561,74 @@ class AuthController extends Controller
                 return $this->unauthorizedResponse('User not found');
             }
 
-            // Users can only update their own data
-            $targetUser = $authUser;
-
-            // If user_id is provided in request, reject it
+            // If user_id is provided, this is superadmin updating another user's role
             if ($request->filled('user_id')) {
-                return $this->forbiddenResponse('You can only update your own information. Remove user_id from request.');
+                // Only superadmin can update other users
+                if (!$authUser->isSuperAdmin()) {
+                    return $this->forbiddenResponse('Only superadmin can update other users. Remove user_id from request.');
+                }
+
+                // Superadmin must provide role when updating other users
+                if (!$request->filled('role')) {
+                    return $this->validationErrorResponse(
+                        ['role' => ['Role is required when updating another user']],
+                        'Request invalid'
+                    );
+                }
+
+                // Find target user
+                $targetUser = LoginUser::find($request->user_id);
+                if (!$targetUser) {
+                    return $this->notFoundResponse('Target user not found');
+                }
+
+                // Validate only user_id and role (ignore other fields)
+                $validator = Validator::make($request->all(), [
+                    'user_id' => 'required|integer|exists:login_users,id',
+                    'role' => 'required|in:operator,admin,superadmin',
+                ]);
+
+                if ($validator->fails()) {
+                    return $this->validationErrorResponse(
+                        $validator->errors(),
+                        'Request invalid'
+                    );
+                }
+
+                // Update only role
+                $targetUser->update([
+                    'role' => strtolower($request->role),
+                ]);
+
+                // Prepare response data
+                $userData = [
+                    'id' => $targetUser->id,
+                    'username' => $targetUser->username,
+                    'role' => $targetUser->role,
+                    'photo_url' => $targetUser->photo_url,
+                    'employee_id' => $targetUser->employee_id,
+                    'phone' => $targetUser->phone,
+                    'email' => $targetUser->email,
+                    'position' => $targetUser->position,
+                    'department' => $targetUser->department,
+                    'updated_at' => $targetUser->updated_at->format('Y-m-d H:i:s'),
+                ];
+
+                return $this->successResponse(
+                    $userData,
+                    'User role updated successfully'
+                );
             }
 
-            // Validation rules
+            // Regular update (own data or superadmin updating other fields)
+            $targetUser = $authUser; // Default: update own data
+
+            // Validation rules - use target user ID for unique validation
             $validationRules = [
                 'username' => "nullable|string|unique:login_users,username,{$targetUser->id},id",
-                'photo_url' => 'nullable|string', // Accept URL or relative path like /storage/filename.jpg
+                'photo_url' => 'nullable|string',
                 'phone' => 'nullable|string',
                 'email' => "nullable|email|unique:login_users,email,{$targetUser->id},id",
-                // ✅ NEW: Allow user to update their own employee_id (must stay unique)
                 'employee_id' => "nullable|string|unique:login_users,employee_id,{$targetUser->id},id",
             ];
 
@@ -592,7 +647,6 @@ class AuthController extends Controller
                 'photo_url' => $request->photo_url,
                 'phone' => $request->phone,
                 'email' => $request->email,
-                // ✅ NEW: allow updating employee_id for own profile
                 'employee_id' => $request->employee_id,
             ], function($value) {
                 return $value !== null;
