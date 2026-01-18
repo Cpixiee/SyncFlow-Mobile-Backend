@@ -51,8 +51,8 @@ class ReportController extends Controller
     }
 
     /**
-     * Get products for selected quarter
-     * GET /api/v1/reports/filters/products?quarter=3&year=2025
+     * Get products for selected quarter with pagination
+     * GET /api/v1/reports/filters/products?quarter=3&year=2025&keyword=CIVUS&category=1&page=1&limit=10
      */
     public function getProducts(Request $request)
     {
@@ -60,6 +60,10 @@ class ReportController extends Controller
             $validator = Validator::make($request->all(), [
                 'quarter' => 'required|integer|min:1|max:4',
                 'year' => 'required|integer|min:2020|max:2100',
+                'keyword' => 'nullable|string|max:255',
+                'category' => 'nullable|integer|exists:product_categories,id',
+                'page' => 'nullable|integer|min:1',
+                'limit' => 'nullable|integer|min:1|max:100',
             ]);
 
             if ($validator->fails()) {
@@ -68,18 +72,54 @@ class ReportController extends Controller
 
             $quarter = $request->get('quarter');
             $year = $request->get('year');
+            $keyword = $request->get('keyword');
+            $category = $request->get('category');
+            $page = $request->get('page', 1);
+            $limit = $request->get('limit', 10);
 
             // Get quarter range
             $quarterRange = $this->getQuarterRangeFromQuarterNumber($quarter, $year);
 
-            // Get products yang punya measurement di quarter ini
-            $products = Product::with('productCategory')
-                ->whereHas('productMeasurements', function ($query) use ($quarterRange) {
-                    $query->whereBetween('due_date', [$quarterRange['start'], $quarterRange['end']])
-                        ->whereNotNull('due_date');
-                })
+            // Get product IDs yang punya measurement di quarter ini
+            $productIds = ProductMeasurement::whereBetween('due_date', [$quarterRange['start'], $quarterRange['end']])
+                ->whereNotNull('due_date')
                 ->distinct()
-                ->get()
+                ->pluck('product_id')
+                ->toArray();
+
+            if (empty($productIds)) {
+                return response()->json([
+                    'http_code' => 200,
+                    'message' => 'Products retrieved successfully',
+                    'error_id' => null,
+                    'data' => [],
+                    'pagination' => [
+                        'current_page' => 1,
+                        'total_page' => 1,
+                        'limit' => $limit,
+                        'total_docs' => 0,
+                    ],
+                ], 200);
+            }
+
+            // Get products dengan filter
+            $productsQuery = Product::with('productCategory')
+                ->whereIn('id', $productIds);
+
+            // Filter by category
+            if ($category) {
+                $productsQuery->where('product_category_id', $category);
+            }
+
+            // Search by keyword (search in product_name only as per requirement)
+            if ($keyword) {
+                $productsQuery->where('product_name', 'like', "%{$keyword}%");
+            }
+
+            // Paginate
+            $products = $productsQuery->paginate($limit, ['*'], 'page', $page);
+
+            $transformedProducts = collect($products->items())
                 ->map(function ($product) {
                     return [
                         'product_id' => $product->product_id,
@@ -87,9 +127,20 @@ class ReportController extends Controller
                         'product_spec_name' => $product->product_spec_name,
                         'product_category' => $product->productCategory->name ?? null,
                     ];
-                });
+                })->values()->all();
 
-            return $this->successResponse($products, 'Products retrieved successfully');
+            return response()->json([
+                'http_code' => 200,
+                'message' => 'Products retrieved successfully',
+                'error_id' => null,
+                'data' => $transformedProducts,
+                'pagination' => [
+                    'current_page' => $products->currentPage(),
+                    'total_page' => $products->lastPage(),
+                    'limit' => $products->perPage(),
+                    'total_docs' => $products->total(),
+                ],
+            ], 200);
         } catch (\Exception $e) {
             return $this->errorResponse('Error retrieving products: ' . $e->getMessage(), 'PRODUCTS_FETCH_ERROR', 500);
         }
@@ -207,6 +258,10 @@ class ReportController extends Controller
                     continue;
                 }
 
+                // Check if this measurement point has SKIP_CHECK evaluation type
+                $evaluationType = $point['evaluation_type'] ?? null;
+                $isSkipCheck = $evaluationType === 'SKIP_CHECK';
+
                 // Find result for this measurement item
                 $itemResult = null;
                 foreach ($measurementResults as $result) {
@@ -242,11 +297,17 @@ class ReportController extends Controller
                         }
                     } else {
                         $status = null;
-                        $todo++;
+                        // ✅ FIX: SKIP_CHECK items should NOT be counted in todo
+                        if (!$isSkipCheck) {
+                            $todo++;
+                        }
                     }
                 } else {
                     $status = null;
-                    $todo++;
+                    // ✅ FIX: SKIP_CHECK items should NOT be counted in todo
+                    if (!$isSkipCheck) {
+                        $todo++;
+                    }
                 }
 
                 $measurementItems[] = [
@@ -278,6 +339,96 @@ class ReportController extends Controller
             ], 'Report data retrieved successfully');
         } catch (\Exception $e) {
             return $this->errorResponse('Error retrieving report data: ' . $e->getMessage(), 'REPORT_DATA_FETCH_ERROR', 500);
+        }
+    }
+
+    /**
+     * Get master template file (if exists)
+     * GET /api/v1/reports/upload-master?quarter=3&year=2025&product_id=PRD-XXXXX&batch_number=XYZ-123
+     */
+    public function getMasterTemplate(Request $request)
+    {
+        try {
+            $user = JWTAuth::parseToken()->authenticate();
+            if (!$user) {
+                return $this->unauthorizedResponse('User not authenticated');
+            }
+
+            $validator = Validator::make($request->all(), [
+                'quarter' => 'required|integer|min:1|max:4',
+                'year' => 'required|integer|min:2020|max:2100',
+                'product_id' => 'required|string',
+                'batch_number' => 'required|string',
+            ]);
+
+            if ($validator->fails()) {
+                return $this->validationErrorResponse($validator->errors());
+            }
+
+            $quarter = $request->get('quarter');
+            $year = $request->get('year');
+            $productId = $request->get('product_id');
+            $batchNumber = $request->get('batch_number');
+
+            // Get product and measurement
+            $product = Product::where('product_id', $productId)->first();
+            if (!$product) {
+                return $this->notFoundResponse('Product tidak ditemukan');
+            }
+
+            $quarterRange = $this->getQuarterRangeFromQuarterNumber($quarter, $year);
+            $measurement = ProductMeasurement::where('product_id', $product->id)
+                ->where('batch_number', $batchNumber)
+                ->whereBetween('due_date', [$quarterRange['start'], $quarterRange['end']])
+                ->first();
+
+            if (!$measurement) {
+                return $this->notFoundResponse('Measurement tidak ditemukan untuk batch number ini');
+            }
+
+            // Check if master file exists for this measurement
+            $masterFile = ReportMasterFile::where('product_measurement_id', $measurement->id)->first();
+
+            if (!$masterFile) {
+                return $this->successResponse([
+                    'has_template' => false,
+                    'template' => null,
+                ], 'No template found for this measurement');
+            }
+
+            // Get user info safely
+            $uploadedBy = null;
+            try {
+                if ($masterFile->user_id) {
+                    $user = \App\Models\LoginUser::find($masterFile->user_id);
+                    $uploadedBy = $user ? $user->username : null;
+                }
+            } catch (\Exception $e) {
+                // If user not found, just set to null
+                $uploadedBy = null;
+            }
+
+            return $this->successResponse([
+                'has_template' => true,
+                'template' => [
+                    'master_file_id' => $masterFile->id,
+                    'product_measurement_id' => $measurement->id,
+                    'measurement_id' => $measurement->measurement_id,
+                    'batch_number' => $batchNumber,
+                    'original_filename' => $masterFile->original_filename,
+                    'stored_filename' => $masterFile->stored_filename,
+                    'file_path' => $masterFile->file_path,
+                    'sheet_names' => $masterFile->sheet_names ?? [],
+                    'total_sheets' => count($masterFile->sheet_names ?? []),
+                    'has_raw_data_sheet' => in_array('raw_data', $masterFile->sheet_names ?? []),
+                    'uploaded_by' => $uploadedBy,
+                    'uploaded_at' => $masterFile->created_at->format('Y-m-d H:i:s'),
+                ],
+            ], 'Template retrieved successfully');
+        } catch (\Exception $e) {
+            Log::error('Error retrieving template: ' . $e->getMessage());
+            Log::error('Stack trace: ' . $e->getTraceAsString());
+            return $this->errorResponse('Error retrieving template: ' . $e->getMessage(), 'TEMPLATE_FETCH_ERROR', 500);
         }
     }
 
