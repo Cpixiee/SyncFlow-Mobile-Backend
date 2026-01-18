@@ -196,6 +196,7 @@ Route::prefix('v1')->group(function () {
             Route::post('/upload-master', [\App\Http\Controllers\Api\V1\ReportController::class, 'uploadMasterFile']);
             
             // Download endpoints
+            Route::get('/download/master', [\App\Http\Controllers\Api\V1\ReportController::class, 'downloadMasterFile']);
             Route::get('/download/excel', [\App\Http\Controllers\Api\V1\ReportController::class, 'downloadExcel']);
             Route::get('/download/pdf', [\App\Http\Controllers\Api\V1\ReportController::class, 'downloadPdf']);
         });

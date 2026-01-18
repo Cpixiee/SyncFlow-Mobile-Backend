@@ -537,6 +537,87 @@ class ReportController extends Controller
     }
 
     /**
+     * Download master template file
+     * GET /api/v1/reports/download/master?quarter=3&year=2025&product_id=PRD-XXXXX&batch_number=XYZ-123
+     */
+    public function downloadMasterFile(Request $request)
+    {
+        try {
+            $user = JWTAuth::parseToken()->authenticate();
+            if (!$user) {
+                return $this->unauthorizedResponse('User not authenticated');
+            }
+
+            $validator = Validator::make($request->all(), [
+                'quarter' => 'required|integer|min:1|max:4',
+                'year' => 'required|integer|min:2020|max:2100',
+                'product_id' => 'required|string',
+                'batch_number' => 'required|string',
+            ]);
+
+            if ($validator->fails()) {
+                return $this->validationErrorResponse($validator->errors());
+            }
+
+            $quarter = $request->get('quarter');
+            $year = $request->get('year');
+            $productId = $request->get('product_id');
+            $batchNumber = $request->get('batch_number');
+
+            // Get product and measurement
+            $product = Product::where('product_id', $productId)->first();
+            if (!$product) {
+                return $this->notFoundResponse('Product tidak ditemukan');
+            }
+
+            $quarterRange = $this->getQuarterRangeFromQuarterNumber($quarter, $year);
+            $measurement = ProductMeasurement::where('product_id', $product->id)
+                ->where('batch_number', $batchNumber)
+                ->whereBetween('due_date', [$quarterRange['start'], $quarterRange['end']])
+                ->first();
+
+            if (!$measurement) {
+                return $this->notFoundResponse('Measurement tidak ditemukan untuk batch number ini');
+            }
+
+            // Check if master file exists for this measurement
+            $masterFile = ReportMasterFile::where('product_measurement_id', $measurement->id)->first();
+
+            if (!$masterFile) {
+                return $this->notFoundResponse('Master file tidak ditemukan untuk measurement ini');
+            }
+
+            // Check if file exists in storage
+            $filePath = storage_path('app/private/' . $masterFile->file_path);
+            
+            if (!file_exists($filePath)) {
+                return $this->errorResponse(
+                    'Master file tidak ditemukan di storage. Silakan upload ulang.',
+                    'MASTER_FILE_NOT_FOUND',
+                    404
+                );
+            }
+
+            if (!is_readable($filePath)) {
+                return $this->errorResponse(
+                    'Master file tidak dapat dibaca. Cek permission file.',
+                    'MASTER_FILE_NOT_READABLE',
+                    500
+                );
+            }
+
+            // Return file download
+            return response()->download($filePath, $masterFile->original_filename, [
+                'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error downloading master file: ' . $e->getMessage());
+            Log::error('Stack trace: ' . $e->getTraceAsString());
+            return $this->errorResponse('Error downloading master file: ' . $e->getMessage(), 'MASTER_FILE_DOWNLOAD_ERROR', 500);
+        }
+    }
+
+    /**
      * Download Excel (Admin/SuperAdmin)
      * GET /api/v1/reports/download/excel?quarter=3&year=2025&product_id=PRD-XXXXX&batch_number=XYZ-22082025-01
      */
