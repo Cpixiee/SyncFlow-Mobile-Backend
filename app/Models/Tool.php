@@ -18,6 +18,7 @@ class Tool extends Model
         'last_calibration_at',
         'next_calibration_at',
         'imei',
+        'device_id',
         'status'
     ];
 

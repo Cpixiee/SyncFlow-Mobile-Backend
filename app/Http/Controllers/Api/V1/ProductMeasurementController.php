@@ -32,6 +32,8 @@ class ProductMeasurementController extends Controller
                 'year' => 'required|integer|min:2020|max:2100',
                 'page' => 'nullable|integer|min:1',
                 'limit' => 'nullable|integer|min:1|max:100',
+                'category_id' => 'nullable|integer|exists:product_categories,id',
+                'query' => 'nullable|string|max:255',
             ]);
 
             if ($validator->fails()) {
@@ -45,6 +47,8 @@ class ProductMeasurementController extends Controller
             $year = $request->get('year');
             $page = $request->get('page', 1);
             $limit = $request->get('limit', 10);
+            $categoryId = $request->get('category_id');
+            $query = $request->get('query');
 
             // Get quarter range
             $quarterRange = $this->getQuarterRangeFromQuarterNumber($quarter, $year);
@@ -62,6 +66,22 @@ class ProductMeasurementController extends Controller
             // Filter products yang belum punya measurement (due_date) di quarter ini
             if (!empty($productsWithMeasurement)) {
                 $allProductsQuery->whereNotIn('id', $productsWithMeasurement);
+            }
+
+            // Filter by category_id
+            if ($categoryId) {
+                $allProductsQuery->where('product_category_id', $categoryId);
+            }
+
+            // Search query
+            if ($query) {
+                $allProductsQuery->where(function($q) use ($query) {
+                    $q->where('product_spec_name', 'like', "%{$query}%")
+                      ->orWhere('product_name', 'like', "%{$query}%")
+                      ->orWhere('product_id', 'like', "%{$query}%")
+                      ->orWhere('article_code', 'like', "%{$query}%")
+                      ->orWhere('ref_spec_number', 'like', "%{$query}%");
+                });
             }
 
             // Paginate results
@@ -228,6 +248,7 @@ class ProductMeasurementController extends Controller
                 $productStatus = $this->determineProductStatus($latestMeasurement);
                 $sampleStatus = $latestMeasurement->getSampleStatus();
                 $progress = $this->calculateProgress($latestMeasurement);
+                $isOverdue = $latestMeasurement->is_overdue;
                 
                 // Apply status filter if provided
                 if ($status && $productStatus !== $status) {
@@ -238,6 +259,7 @@ class ProductMeasurementController extends Controller
                     'product_measurement_id' => $latestMeasurement->measurement_id,
                     'measurement_type' => $latestMeasurement->measurement_type->value,
                     'status' => $productStatus,
+                    'is_overdue' => $isOverdue,
                     'sample_status' => $sampleStatus->value,
                     'batch_number' => $latestMeasurement->batch_number,
                     'progress' => $progress,
@@ -284,6 +306,7 @@ class ProductMeasurementController extends Controller
 
     /**
      * Determine product status based on measurement
+     * Note: is_overdue is now a separate field, not a status
      */
     private function determineProductStatus($measurement): string
     {
@@ -291,11 +314,7 @@ class ProductMeasurementController extends Controller
             return 'TODO'; // No measurement created yet
         }
 
-        // Check if overdue first
-        if ($measurement->is_overdue) {
-            return 'OVERDUE';
-        }
-
+        // Status should remain as actual status, not OVERDUE
         switch ($measurement->status) {
             case 'PENDING':
                 return 'TODO';

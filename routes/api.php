@@ -87,6 +87,10 @@ Route::prefix('v1')->group(function () {
 
         // Scale Measurement routes
         Route::prefix('scale-measurement')->group(function () {
+            // Source setting endpoints - must be before /{scaleMeasurementId}
+            Route::get('/source', [ScaleMeasurementController::class, 'getSource']);
+            Route::post('/source', [ScaleMeasurementController::class, 'updateSource']);
+            
             // Admin dan SuperAdmin only routes (Update & Delete)
             Route::middleware('role:admin,superadmin')->group(function () {
                 Route::put('/{scaleMeasurementId}', [ScaleMeasurementController::class, 'update']);

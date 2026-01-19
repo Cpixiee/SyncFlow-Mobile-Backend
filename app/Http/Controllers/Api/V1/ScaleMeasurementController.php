@@ -8,6 +8,7 @@ use App\Models\Product;
 use App\Traits\ApiResponseTrait;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\File;
 use Tymon\JWTAuth\Facades\JWTAuth;
 
 class ScaleMeasurementController extends Controller
@@ -417,6 +418,8 @@ class ScaleMeasurementController extends Controller
                 'date' => 'required|date',
                 'page' => 'nullable|integer|min:1',
                 'limit' => 'nullable|integer|min:1|max:100',
+                'category_id' => 'nullable|integer|exists:product_categories,id',
+                'query' => 'nullable|string|max:255',
             ]);
 
             if ($validator->fails()) {
@@ -429,6 +432,8 @@ class ScaleMeasurementController extends Controller
             $date = $request->get('date');
             $page = $request->get('page', 1);
             $limit = $request->get('limit', 10);
+            $categoryId = $request->get('category_id');
+            $query = $request->get('query');
 
             // Get products yang sudah ada measurement di tanggal tersebut
             $productsWithMeasurement = ScaleMeasurement::whereDate('measurement_date', $date)
@@ -441,6 +446,22 @@ class ScaleMeasurementController extends Controller
 
             if (!empty($productsWithMeasurement)) {
                 $allProductsQuery->whereNotIn('id', $productsWithMeasurement);
+            }
+
+            // Filter by category_id
+            if ($categoryId) {
+                $allProductsQuery->where('product_category_id', $categoryId);
+            }
+
+            // Search query
+            if ($query) {
+                $allProductsQuery->where(function($q) use ($query) {
+                    $q->where('product_spec_name', 'like', "%{$query}%")
+                      ->orWhere('product_name', 'like', "%{$query}%")
+                      ->orWhere('product_id', 'like', "%{$query}%")
+                      ->orWhere('article_code', 'like', "%{$query}%")
+                      ->orWhere('ref_spec_number', 'like', "%{$query}%");
+                });
             }
 
             // Paginate
@@ -594,6 +615,78 @@ class ScaleMeasurementController extends Controller
             return $this->errorResponse(
                 'Could not create bulk scale measurements: ' . $e->getMessage(),
                 'SCALE_MEASUREMENT_BULK_CREATE_ERROR',
+                500
+            );
+        }
+    }
+
+    /**
+     * Get scale measurement source setting
+     * GET /api/v1/scale-measurement/source
+     */
+    public function getSource(Request $request)
+    {
+        try {
+            $isAutomatic = config('scale_measurement.is_automatic', false);
+
+            return $this->successResponse([
+                'is_automatic' => (bool) $isAutomatic,
+            ], 'Scale measurement source setting retrieved successfully');
+        } catch (\Exception $e) {
+            return $this->errorResponse(
+                'Could not retrieve scale measurement source setting: ' . $e->getMessage(),
+                'SCALE_MEASUREMENT_SOURCE_FETCH_ERROR',
+                500
+            );
+        }
+    }
+
+    /**
+     * Update scale measurement source setting
+     * POST /api/v1/scale-measurement/source
+     */
+    public function updateSource(Request $request)
+    {
+        try {
+            // Get authenticated user
+            $user = JWTAuth::parseToken()->authenticate();
+            
+            if (!$user) {
+                return $this->unauthorizedResponse('User not authenticated');
+            }
+
+            // Validate request
+            $validator = Validator::make($request->all(), [
+                'is_automatic' => 'required|boolean',
+            ]);
+
+            if ($validator->fails()) {
+                return $this->validationErrorResponse(
+                    $validator->errors(),
+                    'Request invalid'
+                );
+            }
+
+            $isAutomatic = $request->boolean('is_automatic');
+
+            // Update config file
+            $configPath = config_path('scale_measurement.php');
+            $configContent = "<?php\n\nreturn [\n    'is_automatic' => " . ($isAutomatic ? 'true' : 'false') . ",\n];\n";
+            
+            File::put($configPath, $configContent);
+
+            // Clear config cache
+            if (function_exists('opcache_reset')) {
+                opcache_reset();
+            }
+
+            return $this->successResponse([
+                'is_automatic' => $isAutomatic,
+            ], 'Scale measurement source setting updated successfully');
+        } catch (\Exception $e) {
+            return $this->errorResponse(
+                'Could not update scale measurement source setting: ' . $e->getMessage(),
+                'SCALE_MEASUREMENT_SOURCE_UPDATE_ERROR',
                 500
             );
         }

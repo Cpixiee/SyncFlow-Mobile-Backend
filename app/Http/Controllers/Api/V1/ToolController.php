@@ -60,7 +60,8 @@ class ToolController extends Controller
                 $query->where(function($q) use ($search) {
                     $q->where('tool_name', 'like', "%{$search}%")
                       ->orWhere('tool_model', 'like', "%{$search}%")
-                      ->orWhere('imei', 'like', "%{$search}%");
+                      ->orWhere('imei', 'like', "%{$search}%")
+                      ->orWhere('device_id', 'like', "%{$search}%");
                 });
             }
 
@@ -78,6 +79,7 @@ class ToolController extends Controller
                         'last_calibration_at' => $tool->last_calibration_at?->format('Y-m-d'),
                         'next_calibration_at' => $tool->next_calibration_at?->format('Y-m-d'),
                         'imei' => $tool->imei,
+                        'device_id' => $tool->device_id,
                         'status' => $tool->status->value,
                         'status_description' => $tool->status->getDescription(),
                         'created_at' => $tool->created_at->toISOString(),
@@ -127,6 +129,7 @@ class ToolController extends Controller
                     'last_calibration_at' => $tool->last_calibration_at?->format('Y-m-d'),
                     'next_calibration_at' => $tool->next_calibration_at?->format('Y-m-d'),
                     'imei' => $tool->imei,
+                    'device_id' => $tool->device_id,
                     'status' => $tool->status->value,
                     'status_description' => $tool->status->getDescription(),
                     'created_at' => $tool->created_at->toISOString(),
@@ -157,6 +160,7 @@ class ToolController extends Controller
                 'last_calibration_at' => 'nullable|date',
                 'next_calibration_at' => 'nullable|date',
                 'imei' => 'required|string|max:255|unique:tools,imei',
+                'device_id' => 'required|string|max:255',
                 'status' => ['nullable', new Enum(ToolStatus::class)],
             ]);
 
@@ -172,6 +176,7 @@ class ToolController extends Controller
                 'last_calibration_at' => $request->input('last_calibration_at'),
                 'next_calibration_at' => $request->input('next_calibration_at'),
                 'imei' => $request->input('imei'),
+                'device_id' => $request->input('device_id'),
                 'status' => $request->input('status', 'ACTIVE'),
             ]);
 
@@ -185,6 +190,7 @@ class ToolController extends Controller
                     'last_calibration_at' => $tool->last_calibration_at?->format('Y-m-d'),
                     'next_calibration_at' => $tool->next_calibration_at?->format('Y-m-d'),
                     'imei' => $tool->imei,
+                    'device_id' => $tool->device_id,
                     'status' => $tool->status->value,
                     'status_description' => $tool->status->getDescription(),
                     'created_at' => $tool->created_at->toISOString(),
@@ -222,6 +228,7 @@ class ToolController extends Controller
                 'last_calibration_at' => 'nullable|date',
                 'next_calibration_at' => 'nullable|date',
                 'imei' => 'nullable|string|max:255|unique:tools,imei,' . $id,
+                'device_id' => 'nullable|string|max:255',
                 'status' => ['nullable', new Enum(ToolStatus::class)],
             ]);
 
@@ -248,6 +255,9 @@ class ToolController extends Controller
             if ($request->has('imei')) {
                 $tool->imei = $request->input('imei');
             }
+            if ($request->has('device_id')) {
+                $tool->device_id = $request->input('device_id');
+            }
             if ($request->has('status')) {
                 $tool->status = $request->input('status');
             }
@@ -264,6 +274,7 @@ class ToolController extends Controller
                     'last_calibration_at' => $tool->last_calibration_at?->format('Y-m-d'),
                     'next_calibration_at' => $tool->next_calibration_at?->format('Y-m-d'),
                     'imei' => $tool->imei,
+                    'device_id' => $tool->device_id,
                     'status' => $tool->status->value,
                     'status_description' => $tool->status->getDescription(),
                     'created_at' => $tool->created_at->toISOString(),
@@ -456,6 +467,7 @@ class ToolController extends Controller
                     'lastCalibration' => $tool->last_calibration_at?->toISOString(),
                     'nextCalibration' => $tool->next_calibration_at?->toISOString(),
                     'imei' => $tool->imei,
+                    'deviceId' => $tool->device_id,
                     'status' => $tool->status->value,
                     'statusDescription' => $tool->status->getDescription(),
                     'createdAt' => $tool->created_at->toISOString(),
