@@ -164,7 +164,7 @@ class ScaleMeasurementController extends Controller
             // Validate request
             $validator = Validator::make($request->all(), [
                 'product_id' => 'required|string|exists:products,product_id',
-                'batch_number' => 'required|string|unique:scale_measurements,batch_number',
+                'batch_number' => 'required|string|max:255',
                 'machine_number' => 'nullable|string|max:255',
                 'measurement_date' => 'required|date',
                 'weight' => 'nullable|numeric|min:0',
@@ -193,6 +193,19 @@ class ScaleMeasurementController extends Controller
                 return $this->errorResponse(
                     'Product ini sudah memiliki scale measurement untuk tanggal tersebut',
                     'DUPLICATE_SCALE_MEASUREMENT',
+                    400
+                );
+            }
+
+            // ✅ Check batch_number unique per product_id (not globally)
+            $existingBatch = ScaleMeasurement::where('product_id', $product->id)
+                ->where('batch_number', $request->batch_number)
+                ->first();
+
+            if ($existingBatch) {
+                return $this->errorResponse(
+                    "Batch number '{$request->batch_number}' sudah digunakan untuk product ini",
+                    'DUPLICATE_BATCH_NUMBER',
                     400
                 );
             }
@@ -301,7 +314,7 @@ class ScaleMeasurementController extends Controller
 
             // Validate request
             $validator = Validator::make($request->all(), [
-                'batch_number' => "nullable|string|unique:scale_measurements,batch_number,{$measurement->id}",
+                'batch_number' => 'nullable|string|max:255',
                 'machine_number' => 'nullable|string|max:255',
                 'measurement_date' => 'nullable|date',
                 'weight' => 'nullable|numeric|min:0',
@@ -317,6 +330,20 @@ class ScaleMeasurementController extends Controller
 
             // Update fields
             if ($request->has('batch_number')) {
+                // ✅ Check batch_number unique per product_id (not globally)
+                $existingBatch = ScaleMeasurement::where('product_id', $measurement->product_id)
+                    ->where('batch_number', $request->batch_number)
+                    ->where('id', '!=', $measurement->id)
+                    ->first();
+
+                if ($existingBatch) {
+                    return $this->errorResponse(
+                        "Batch number '{$request->batch_number}' sudah digunakan untuk product ini",
+                        'DUPLICATE_BATCH_NUMBER',
+                        400
+                    );
+                }
+
                 $measurement->batch_number = $request->batch_number;
             }
 
@@ -611,11 +638,13 @@ class ScaleMeasurementController extends Controller
                     // Format baru: batch_numbers object dengan mapping per product
                     $batchNumber = $batchNumbersMap[$product->product_id];
                     
-                    // Validate uniqueness
-                    $existingBatch = ScaleMeasurement::where('batch_number', $batchNumber)->first();
+                    // ✅ Validate uniqueness per product_id (not globally)
+                    $existingBatch = ScaleMeasurement::where('product_id', $product->id)
+                        ->where('batch_number', $batchNumber)
+                        ->first();
                     if ($existingBatch) {
                         return $this->errorResponse(
-                            "Batch number '{$batchNumber}' sudah digunakan untuk product lain",
+                            "Batch number '{$batchNumber}' sudah digunakan untuk product ini",
                             'DUPLICATE_BATCH_NUMBER',
                             400
                         );
