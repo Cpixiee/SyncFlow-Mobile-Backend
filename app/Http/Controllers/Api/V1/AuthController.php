@@ -641,6 +641,37 @@ class AuthController extends Controller
                 );
             }
 
+            // ✅ Support uploading profile image via this endpoint too (multipart/form-data)
+            // Accept "image" field same as uploadProfileImage()
+            if ($request->hasFile('image')) {
+                $imageValidator = Validator::make($request->all(), [
+                    'image' => 'image|mimes:jpeg,jpg,png,gif,webp|max:5120',
+                ]);
+
+                if ($imageValidator->fails()) {
+                    return $this->validationErrorResponse(
+                        $imageValidator->errors(),
+                        'Request invalid'
+                    );
+                }
+
+                // Delete old image if exists
+                if ($authUser->photo_url) {
+                    $oldImagePath = str_replace('/storage/', '', parse_url($authUser->photo_url, PHP_URL_PATH));
+                    if ($oldImagePath && Storage::disk('public')->exists($oldImagePath)) {
+                        Storage::disk('public')->delete($oldImagePath);
+                    }
+                }
+
+                // Store uploaded file
+                $image = $request->file('image');
+                $filename = time() . '_' . uniqid() . '.' . $image->getClientOriginalExtension();
+                $image->storeAs('', $filename, 'public');
+
+                // Set photo_url for update
+                $request->merge(['photo_url' => '/storage/' . $filename]);
+            }
+
             // Prepare update data
             $updateData = array_filter([
                 'username' => $request->username,

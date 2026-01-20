@@ -1,6 +1,13 @@
 <?php
 
 return [
+    // Default: manual
+    'is_automatic' => false,
+];
+
+<?php
+
+return [
     /*
     |--------------------------------------------------------------------------
     | Scale Measurement Source Type

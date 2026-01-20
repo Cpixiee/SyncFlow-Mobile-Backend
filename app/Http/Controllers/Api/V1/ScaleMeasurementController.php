@@ -3,12 +3,12 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
+use App\Models\AppSetting;
 use App\Models\ScaleMeasurement;
 use App\Models\Product;
 use App\Traits\ApiResponseTrait;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
-use Illuminate\Support\Facades\File;
 use Tymon\JWTAuth\Facades\JWTAuth;
 
 class ScaleMeasurementController extends Controller
@@ -525,7 +525,12 @@ class ScaleMeasurementController extends Controller
                 'batch_number' => 'required_without:batch_numbers|string',
                 'batch_numbers' => 'required_without:batch_number|array',
                 'batch_numbers.*' => 'required|string',
+                // Support two formats for machine number:
+                // 1. machine_number (string) - untuk semua product
+                // 2. machine_numbers (object) - untuk set machine_number per product
                 'machine_number' => 'nullable|string|max:255',
+                'machine_numbers' => 'nullable|array',
+                'machine_numbers.*' => 'nullable|string|max:255',
                 'measurement_date' => 'required|date',
             ]);
 
@@ -539,6 +544,7 @@ class ScaleMeasurementController extends Controller
             $results = [];
             $products = Product::whereIn('product_id', $request->product_ids)->get();
             $batchNumbersMap = $request->batch_numbers ?? [];
+            $machineNumbersMap = $request->machine_numbers ?? [];
 
             // ✅ Validasi: Jika menggunakan batch_numbers, pastikan semua product_ids ada di map
             if (!empty($batchNumbersMap)) {
@@ -559,6 +565,30 @@ class ScaleMeasurementController extends Controller
                     return $this->errorResponse(
                         $message,
                         'MISSING_BATCH_NUMBER',
+                        400
+                    );
+                }
+            }
+
+            // ✅ Validasi: Jika menggunakan machine_numbers, pastikan semua product_ids ada di map
+            if (!empty($machineNumbersMap)) {
+                $missingProducts = [];
+                foreach ($request->product_ids as $productId) {
+                    if (!array_key_exists($productId, $machineNumbersMap)) {
+                        $missingProducts[] = $productId;
+                    }
+                }
+
+                if (!empty($missingProducts)) {
+                    $missingList = implode(', ', $missingProducts);
+                    $count = count($missingProducts);
+                    $message = $count === 1
+                        ? "Tidak ada machine number untuk product: {$missingList}"
+                        : "Tidak ada machine number untuk {$count} product: {$missingList}";
+
+                    return $this->errorResponse(
+                        $message,
+                        'MISSING_MACHINE_NUMBER',
                         400
                     );
                 }
@@ -595,10 +625,18 @@ class ScaleMeasurementController extends Controller
                     $batchNumber = $request->batch_number . '-' . strtoupper(substr(uniqid(), -6));
                 }
 
+                // Determine machine_number:
+                // 1. If machine_numbers map exists for this product, use it (can be null/empty)
+                // 2. Else fallback to machine_number (global)
+                $machineNumber = $request->machine_number;
+                if (!empty($machineNumbersMap) && array_key_exists($product->product_id, $machineNumbersMap)) {
+                    $machineNumber = $machineNumbersMap[$product->product_id];
+                }
+
                 $measurement = ScaleMeasurement::create([
                     'product_id' => $product->id,
                     'batch_number' => $batchNumber,
-                    'machine_number' => $request->machine_number,
+                    'machine_number' => $machineNumber,
                     'measurement_date' => $request->measurement_date,
                     'weight' => null,
                     'status' => 'NOT_CHECKED',
@@ -627,7 +665,10 @@ class ScaleMeasurementController extends Controller
     public function getSource(Request $request)
     {
         try {
-            $isAutomatic = config('scale_measurement.is_automatic', false);
+            $raw = AppSetting::getValue('scale_measurement.is_automatic', null);
+            $isAutomatic = $raw !== null
+                ? in_array((string) $raw, ['1', 'true', 'TRUE'], true)
+                : (bool) config('scale_measurement.is_automatic', false);
 
             return $this->successResponse([
                 'is_automatic' => (bool) $isAutomatic,
@@ -669,16 +710,8 @@ class ScaleMeasurementController extends Controller
 
             $isAutomatic = $request->boolean('is_automatic');
 
-            // Update config file
-            $configPath = config_path('scale_measurement.php');
-            $configContent = "<?php\n\nreturn [\n    'is_automatic' => " . ($isAutomatic ? 'true' : 'false') . ",\n];\n";
-            
-            File::put($configPath, $configContent);
-
-            // Clear config cache
-            if (function_exists('opcache_reset')) {
-                opcache_reset();
-            }
+            // Persist setting to DB (writable on prod)
+            AppSetting::setValue('scale_measurement.is_automatic', $isAutomatic);
 
             return $this->successResponse([
                 'is_automatic' => $isAutomatic,

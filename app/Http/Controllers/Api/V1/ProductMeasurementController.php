@@ -262,6 +262,7 @@ class ProductMeasurementController extends Controller
                     'is_overdue' => $isOverdue,
                     'sample_status' => $sampleStatus->value,
                     'batch_number' => $latestMeasurement->batch_number,
+                    'machine_number' => $latestMeasurement->machine_number,
                     'progress' => $progress,
                     'due_date' => $latestMeasurement->due_date ? $latestMeasurement->due_date->format('Y-m-d H:i:s') : null,
                     'product' => [
@@ -3120,6 +3121,7 @@ class ProductMeasurementController extends Controller
                 'measurement_id' => $measurement->measurement_id,
                 'product_id' => $measurement->product->product_id,
                 'batch_number' => $measurement->batch_number,
+                'machine_number' => $measurement->machine_number,
                 'sample_count' => $measurement->sample_count,
                 'measurement_type' => $measurement->measurement_type->value,
                 'product_status' => $measurement->getProductStatus(),
@@ -3975,20 +3977,33 @@ class ProductMeasurementController extends Controller
             // Get quarter range
             $quarterRange = $this->getQuarterRangeFromQuarterNumber($quarter, $year);
 
-            // Get all measurements in this quarter
-            $measurements = ProductMeasurement::whereBetween('due_date', [$quarterRange['start'], $quarterRange['end']])
-                ->whereNotNull('due_date')
+            // ✅ Align with list endpoint: count latest measurement per product within this quarter
+            $products = Product::with(['productCategory', 'quarter'])
+                ->select('products.*')
+                ->join('product_measurements', 'products.id', '=', 'product_measurements.product_id')
+                ->whereBetween('product_measurements.due_date', [$quarterRange['start'], $quarterRange['end']])
+                ->whereNotNull('product_measurements.due_date')
+                ->distinct()
                 ->get();
 
-            // Calculate progress
-            $totalProducts = $measurements->count();
+            $totalProducts = $products->count();
             $ok = 0;
             $needToMeasure = 0;
             $ongoing = 0;
             $notChecked = 0;
 
-            foreach ($measurements as $measurement) {
-                $productStatus = $this->determineProductStatus($measurement);
+            foreach ($products as $product) {
+                $latestMeasurement = ProductMeasurement::where('product_id', $product->id)
+                    ->whereBetween('due_date', [$quarterRange['start'], $quarterRange['end']])
+                    ->whereNotNull('due_date')
+                    ->latest('created_at')
+                    ->first();
+
+                if (!$latestMeasurement) {
+                    continue;
+                }
+
+                $productStatus = $this->determineProductStatus($latestMeasurement);
                 
                 switch ($productStatus) {
                     case 'OK':
