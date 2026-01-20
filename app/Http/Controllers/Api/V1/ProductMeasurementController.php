@@ -3106,6 +3106,13 @@ class ProductMeasurementController extends Controller
                 if (!isset($item['status']) && isset($evaluated['status'])) {
                     $item['status'] = $evaluated['status'];
                 }
+
+                // ✅ FIX: For SKIP_CHECK items, status must always be NULL in API response
+                // This ensures legacy data (yang dulu tersimpan sebagai false) tidak muncul sebagai NG
+                $evaluationType = $point['evaluation_type'] ?? null;
+                if ($evaluationType === 'SKIP_CHECK') {
+                    $item['status'] = null;
+                }
                 
                 // ✅ FIX: Update context after recompute so next items can use the updated values
                 $context[$itemId] = [

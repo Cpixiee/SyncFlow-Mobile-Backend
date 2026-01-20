@@ -846,7 +846,8 @@ class ProductController extends Controller
                 // Measurement Points - optional untuk update
                 'measurement_points' => 'nullable|array',
                 'measurement_points.*.setup.name' => 'required_with:measurement_points|string',
-                'measurement_points.*.setup.name_id' => 'required_with:measurement_points|string|regex:/^[a-zA-Z_]+$/',
+                // ✅ Align with create: format validation handled in enhanced validation helper
+                'measurement_points.*.setup.name_id' => 'required_with:measurement_points|string',
                 'measurement_points.*.setup.sample_amount' => 'required_with:measurement_points|integer|min:0', // ✅ Allow 0 for auto-calculate from formula
                 'measurement_points.*.setup.nature' => 'required_with:measurement_points|in:QUALITATIVE,QUANTITATIVE',
                 'measurement_points.*.setup.source' => 'nullable|in:MANUAL,DERIVED,TOOL,INSTRUMENT',
@@ -856,12 +857,14 @@ class ProductController extends Controller
                 'measurement_points.*.setup.type' => 'nullable|in:SINGLE,BEFORE_AFTER',
                 'measurement_points.*.variables' => 'nullable|array',
                 'measurement_points.*.variables.*.type' => 'required_with:measurement_points.*.variables|in:FIXED,MANUAL,FORMULA',
-                'measurement_points.*.variables.*.name' => 'required_with:measurement_points.*.variables|string|regex:/^[a-zA-Z_][a-zA-Z0-9_]*$/',
+                // ✅ Align with create: name format (allowed chars, etc) divalidasi di enhanced validation
+                'measurement_points.*.variables.*.name' => 'required_with:measurement_points.*.variables|string',
                 'measurement_points.*.variables.*.value' => 'required_if:measurement_points.*.variables.*.type,FIXED|nullable|numeric',
                 'measurement_points.*.variables.*.formula' => 'required_if:measurement_points.*.variables.*.type,FORMULA|nullable|string',
                 'measurement_points.*.variables.*.is_show' => 'required_with:measurement_points.*.variables|boolean',
                 'measurement_points.*.pre_processing_formulas' => 'nullable|array',
-                'measurement_points.*.pre_processing_formulas.*.name' => 'required_with:measurement_points.*.pre_processing_formulas|string|regex:/^[a-zA-Z_][a-zA-Z0-9_]*$/',
+                // ✅ Align with create: name format divalidasi di enhanced validation
+                'measurement_points.*.pre_processing_formulas.*.name' => 'required_with:measurement_points.*.pre_processing_formulas|string',
                 'measurement_points.*.pre_processing_formulas.*.formula' => 'required_with:measurement_points.*.pre_processing_formulas|string',
                 'measurement_points.*.pre_processing_formulas.*.is_show' => 'required_with:measurement_points.*.pre_processing_formulas|boolean',
                 'measurement_points.*.evaluation_type' => 'required_with:measurement_points|in:PER_SAMPLE,JOINT,SKIP_CHECK',
@@ -938,10 +941,15 @@ class ProductController extends Controller
                 // ✅ FIX: Normalize source_instrument_id (convert name/model to ID if string provided)
                 $measurementPoints = $this->normalizeInstrumentIds($measurementPoints);
 
-                // Validate and process formulas
-                $formulaValidationErrors = $this->validateAndProcessFormulas($measurementPoints);
+                // ✅ Validate and process formulas with enhanced validator (same as create)
+                $formulaValidationErrors = $this->validateAndProcessFormulasEnhanced($measurementPoints);
                 if (!empty($formulaValidationErrors)) {
-                    return $this->errorResponse('Formula validation failed', 'FORMULA_VALIDATION_ERROR', 400, $formulaValidationErrors);
+                    return $this->errorResponse(
+                        'Formula validation failed',
+                        'FORMULA_VALIDATION_ERROR',
+                        400,
+                        $formulaValidationErrors
+                    );
                 }
 
                 // Additional validation for measurement points
