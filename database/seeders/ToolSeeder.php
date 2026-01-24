@@ -110,6 +110,11 @@ class ToolSeeder extends Seeder
         ];
 
         foreach ($tools as $toolData) {
+            // Auto-generate device_id jika belum ada (format: DEVICE-{imei})
+            if (!isset($toolData['device_id'])) {
+                $toolData['device_id'] = 'DEVICE-' . $toolData['imei'];
+            }
+            
             Tool::updateOrCreate(
                 ['imei' => $toolData['imei']], // Match by IMEI (unique key)
                 $toolData                       // Update or insert these values
