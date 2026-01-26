@@ -364,6 +364,7 @@ class ProductController extends Controller
                 'id' => $product->product_id,
                 'basic_info' => [
                     'product_category_id' => $product->product_category_id,
+                    'product_category_name' => $product->productCategory ? $product->productCategory->name : null,
                     'product_name' => $product->product_name,
                     'product_spec_name' => $product->product_spec_name,
                     'ref_spec_number' => $product->ref_spec_number,

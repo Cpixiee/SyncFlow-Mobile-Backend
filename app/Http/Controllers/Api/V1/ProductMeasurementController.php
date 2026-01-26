@@ -444,6 +444,22 @@ class ProductMeasurementController extends Controller
 
                 foreach ($products as $product) {
                     $batchNumber = $request->batch_number ?? 'BATCH-' . date('Ymd') . '-' . strtoupper(substr(uniqid(), -6));
+                    
+                    // ✅ Check batch_number unique per product_id (not globally)
+                    if ($request->has('batch_number')) {
+                        $existingMeasurement = ProductMeasurement::where('product_id', $product->id)
+                            ->where('batch_number', $batchNumber)
+                            ->first();
+                        
+                        if ($existingMeasurement) {
+                            return $this->errorResponse(
+                                "Batch number '{$batchNumber}' sudah digunakan untuk product ini",
+                                'DUPLICATE_BATCH_NUMBER',
+                                400
+                            );
+                        }
+                    }
+                    
                     $measurementPoints = $product->measurement_points ?? [];
                     $sampleCount = $request->sample_count ?? (count($measurementPoints) > 0 ? $measurementPoints[0]['setup']['sample_amount'] ?? 3 : 3);
 
@@ -478,6 +494,22 @@ class ProductMeasurementController extends Controller
             }
 
             $batchNumber = $request->batch_number ?? 'BATCH-' . date('Ymd') . '-' . strtoupper(substr(uniqid(), -6));
+            
+            // ✅ Check batch_number unique per product_id (not globally)
+            if ($request->has('batch_number')) {
+                $existingMeasurement = ProductMeasurement::where('product_id', $product->id)
+                    ->where('batch_number', $batchNumber)
+                    ->first();
+                
+                if ($existingMeasurement) {
+                    return $this->errorResponse(
+                        "Batch number '{$batchNumber}' sudah digunakan untuk product ini",
+                        'DUPLICATE_BATCH_NUMBER',
+                        400
+                    );
+                }
+            }
+            
             $measurementPoints = $product->measurement_points ?? [];
             $sampleCount = $request->sample_count ?? (count($measurementPoints) > 0 ? $measurementPoints[0]['setup']['sample_amount'] ?? 3 : 3);
 
@@ -654,13 +686,14 @@ class ProductMeasurementController extends Controller
                     continue;
                 }
 
-                // Check if batch_number already exists (unique validation)
-                $existingMeasurement = ProductMeasurement::where('batch_number', $batchNumber)
+                // ✅ Check batch_number unique per product_id (not globally)
+                $existingMeasurement = ProductMeasurement::where('product_id', $measurement->product_id)
+                    ->where('batch_number', $batchNumber)
                     ->where('measurement_id', '!=', $measurementId)
                     ->first();
                 
                 if ($existingMeasurement) {
-                    $errors[$measurementId] = "Batch number '{$batchNumber}' sudah digunakan";
+                    $errors[$measurementId] = "Batch number '{$batchNumber}' sudah digunakan untuk product ini";
                     continue;
                 }
 
@@ -723,14 +756,15 @@ class ProductMeasurementController extends Controller
                 return $this->notFoundResponse('Product measurement tidak ditemukan');
             }
 
-            // ✅ FIX: Check if batch_number already exists (unique validation)
-            $existingMeasurement = ProductMeasurement::where('batch_number', $request->batch_number)
+            // ✅ Check batch_number unique per product_id (not globally)
+            $existingMeasurement = ProductMeasurement::where('product_id', $measurement->product_id)
+                ->where('batch_number', $request->batch_number)
                 ->where('measurement_id', '!=', $productMeasurementId)
                 ->first();
             
             if ($existingMeasurement) {
                 return $this->errorResponse(
-                    'Batch number sudah digunakan. Silakan gunakan batch number yang berbeda.',
+                    "Batch number '{$request->batch_number}' sudah digunakan untuk product ini",
                     'DUPLICATE_BATCH_NUMBER',
                     400
                 );
