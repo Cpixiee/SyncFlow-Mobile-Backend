@@ -246,6 +246,21 @@ class ProductMeasurementController extends Controller
 
                 // Determine status and progress
                 $productStatus = $this->determineProductStatus($latestMeasurement);
+
+                // ✅ FIX: Jika measurement terbaru berstatus TODO karena auto-create setelah NG,
+                // tapi ada measurement IN_PROGRESS yang sudah pernah submit dengan hasil NG,
+                // maka status product harus tetap NEED_TO_MEASURE (bukan TODO).
+                if ($productStatus === 'TODO') {
+                    $ngMeasurement = (clone $measurementQuery)
+                        ->where('status', 'IN_PROGRESS')
+                        ->whereNotNull('measured_at')
+                        ->latest('measured_at')
+                        ->first();
+
+                    if ($ngMeasurement && $this->hasBeenSubmittedWithNG($ngMeasurement)) {
+                        $productStatus = 'NEED_TO_MEASURE';
+                    }
+                }
                 $sampleStatus = $latestMeasurement->getSampleStatus();
                 $progress = $this->calculateProgress($latestMeasurement);
                 $isOverdue = $latestMeasurement->is_overdue;

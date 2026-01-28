@@ -831,7 +831,7 @@ class ProductController extends Controller
                 return $this->notFoundResponse('Product tidak ditemukan');
             }
 
-            // Validate request
+            // Validate request (basic type checking only, error akan diformat seperti create)
             $validator = Validator::make($request->all(), [
                 // Basic Info - hanya yang dikirim yang akan diupdate
                 'basic_info.product_category_id' => 'nullable|integer|exists:product_categories,id',
@@ -886,7 +886,73 @@ class ProductController extends Controller
             ]);
 
             if ($validator->fails()) {
-                return $this->validationErrorResponse($validator->errors());
+                // ✅ Align error style with create: convert Laravel validation errors
+                // menjadi basic_info & measurement_points menggunakan ValidationErrorHelper
+                $errors = $validator->errors();
+                $basicInfoErrors = [];
+                $measurementPointErrors = [];
+
+                foreach ($errors->keys() as $key) {
+                    if (str_starts_with($key, 'basic_info.')) {
+                        $field = str_replace('basic_info.', '', $key);
+                        $message = $errors->first($key);
+                        $basicInfoErrors[] = ValidationErrorHelper::createBasicInfoError(
+                            BasicInfoErrorEnum::INVALID_FORMAT,
+                            $field,
+                            $message
+                        );
+                    } elseif (str_starts_with($key, 'measurement_points.')) {
+                        // Extract measurement point index and field
+                        preg_match('/measurement_points\.(\d+)\.(.+)/', $key, $matches);
+                        if (count($matches) === 3) {
+                            $pointIndex = (int) $matches[1];
+                            $fieldPath = $matches[2];
+
+                            $measurementPointsInput = $request->input('measurement_points', []);
+                            // Get measurement point name if available
+                            $measurementPoint = $measurementPointsInput[$pointIndex] ?? null;
+                            $setup = $measurementPoint['setup'] ?? [];
+                            $pointName = $setup['name'] ?? "Measurement Point #{$pointIndex}";
+                            $pointNameId = $setup['name_id'] ?? null;
+
+                            // Determine section and entity name
+                            $section = MeasurementPointSectionEnum::SETUP;
+                            $entityName = 'setup';
+
+                            if (str_contains($fieldPath, 'variables')) {
+                                $section = MeasurementPointSectionEnum::VARIABLE;
+                                preg_match('/variables\.(\d+)\.(.+)/', $fieldPath, $varMatches);
+                                $entityName = $varMatches[2] ?? 'variable';
+                            } elseif (str_contains($fieldPath, 'pre_processing_formulas')) {
+                                $section = MeasurementPointSectionEnum::PRE_PROCESSING_FORMULA;
+                                preg_match('/pre_processing_formulas\.(\d+)\.(.+)/', $fieldPath, $formulaMatches);
+                                $entityName = $formulaMatches[2] ?? 'pre_processing_formula';
+                            }
+
+                            $message = $errors->first($key);
+                            $measurementPointErrors[] = ValidationErrorHelper::createMeasurementPointError(
+                                ['name_id' => $pointNameId, 'name' => $pointName],
+                                $section,
+                                $entityName,
+                                MeasurementPointErrorEnum::INVALID_FORMAT,
+                                "{$pointName} - {$message}"
+                            );
+                        }
+                    }
+                }
+
+                $errorResponse = ValidationErrorHelper::formatErrorResponse(
+                    'PRODUCT_VALIDATION_ERROR',
+                    $basicInfoErrors,
+                    $measurementPointErrors
+                );
+
+                return $this->errorResponse(
+                    'Validation failed',
+                    'PRODUCT_VALIDATION_ERROR',
+                    400,
+                    $errorResponse
+                );
             }
 
             // Update basic info jika ada
@@ -938,18 +1004,53 @@ class ProductController extends Controller
                 
                 // Auto-generate name_id if not provided
                 $measurementPoints = $this->autoGenerateNameIds($measurementPoints);
-
+                
                 // ✅ FIX: Normalize source_instrument_id (convert name/model to ID if string provided)
                 $measurementPoints = $this->normalizeInstrumentIds($measurementPoints);
+
+                // ✅ NEW: Enhanced validation dengan struktur error sama seperti create
+                $basicInfoInput = $request->input('basic_info', []);
+                $basicInfoForValidation = [
+                    'product_name' => $basicInfoInput['product_name'] ?? $product->product_name,
+                    'color' => $basicInfoInput['color'] ?? $product->color,
+                ];
+
+                // Gunakan category terbaru jika diubah, kalau tidak pakai category existing
+                $category = $product->productCategory;
+                if (isset($basicInfoInput['product_category_id'])) {
+                    $category = ProductCategory::find($basicInfoInput['product_category_id']) ?? $category;
+                }
+
+                if ($category) {
+                    $enhancedValidation = $this->validateProductEnhanced($basicInfoForValidation, $measurementPoints, $category);
+                    if (!empty($enhancedValidation['basic_info']) || !empty($enhancedValidation['measurement_points'])) {
+                        $errorResponse = ValidationErrorHelper::formatErrorResponse(
+                            'PRODUCT_VALIDATION_ERROR',
+                            $enhancedValidation['basic_info'],
+                            $enhancedValidation['measurement_points']
+                        );
+                        return $this->errorResponse(
+                            'Validation failed',
+                            'PRODUCT_VALIDATION_ERROR',
+                            400,
+                            $errorResponse
+                        );
+                    }
+                }
 
                 // ✅ Validate and process formulas with enhanced validator (same as create)
                 $formulaValidationErrors = $this->validateAndProcessFormulasEnhanced($measurementPoints);
                 if (!empty($formulaValidationErrors)) {
+                    $errorResponse = ValidationErrorHelper::formatErrorResponse(
+                        'FORMULA_VALIDATION_ERROR',
+                        [],
+                        $formulaValidationErrors
+                    );
                     return $this->errorResponse(
                         'Formula validation failed',
                         'FORMULA_VALIDATION_ERROR',
                         400,
-                        $formulaValidationErrors
+                        $errorResponse
                     );
                 }
 
