@@ -20,6 +20,39 @@ class ProductMeasurementController extends Controller
     use ApiResponseTrait;
 
     /**
+     * Pick the "effective" measurement for a product in a given query scope.
+     *
+     * Problem: after NG submit we auto-create a new TODO measurement. If we always pick latest(created_at),
+     * dashboard/list may show TODO instead of NEED_TO_MEASURE, and summaries can double-count.
+     *
+     * Rule:
+     * - Prefer an IN_PROGRESS measurement that has been submitted with NG (measured_at not null + hasBeenSubmittedWithNG)
+     * - Otherwise use latest created measurement
+     */
+    private function pickEffectiveMeasurementForProduct($measurementQuery): ?ProductMeasurement
+    {
+        $latest = (clone $measurementQuery)->latest('created_at')->first();
+        if (!$latest) {
+            return null;
+        }
+
+        $status = $this->determineProductStatus($latest);
+        if ($status === 'TODO') {
+            $ngMeasurement = (clone $measurementQuery)
+                ->where('status', 'IN_PROGRESS')
+                ->whereNotNull('measured_at')
+                ->latest('measured_at')
+                ->first();
+
+            if ($ngMeasurement && $this->hasBeenSubmittedWithNG($ngMeasurement)) {
+                return $ngMeasurement;
+            }
+        }
+
+        return $latest;
+    }
+
+    /**
      * Get available products for creating new monthly target
      * Returns list of products yang belum punya target di quarter yang dipilih
      */
@@ -1436,10 +1469,13 @@ class ProductMeasurementController extends Controller
     {
         $setup = $measurementPoint['setup'] ?? [];
         $nature = $setup['nature'] ?? null;
+        $requiredSampleAmount = $setup['sample_amount'] ?? 1;
         
         // ✅ FIX: Handle QUALITATIVE nature differently - use qualitative_value directly
         if ($nature === 'QUALITATIVE') {
             $allSamplesOK = true;
+            $hasNG = false;
+            $hasIncomplete = false;
             
             foreach ($result['samples'] as &$sample) {
                 // For QUALITATIVE, qualitative_value (boolean) directly determines status
@@ -1450,15 +1486,23 @@ class ProductMeasurementController extends Controller
                     $sample['status'] = true; // OK
                 } elseif ($qualitativeValue === false) {
                     $sample['status'] = false; // NG
+                    $hasNG = true;
                     $allSamplesOK = false;
                 } else {
-                    // If qualitative_value is null/not provided, treat as NG
-                    $sample['status'] = false;
-                    $allSamplesOK = false;
+                    // If qualitative_value is null/not provided, treat as INCOMPLETE (not NG)
+                    $sample['status'] = null;
+                    $hasIncomplete = true;
                 }
             }
             
-            $result['status'] = $allSamplesOK;
+            if ($hasNG) {
+                $result['status'] = false;
+            } else {
+                if (count($result['samples']) !== $requiredSampleAmount) {
+                    $hasIncomplete = true;
+                }
+                $result['status'] = $hasIncomplete ? null : $allSamplesOK;
+            }
             return $result;
         }
         
@@ -1467,12 +1511,14 @@ class ProductMeasurementController extends Controller
         $evaluationSetting = $measurementPoint['evaluation_setting']['per_sample_setting'];
         
         $allSamplesOK = true;
+        $hasNG = false;
+        $hasIncomplete = false;
         
         foreach ($result['samples'] as &$sample) {
             $valueToEvaluate = null;
             
             if ($evaluationSetting['is_raw_data']) {
-                $valueToEvaluate = $sample['single_value'];
+                $valueToEvaluate = $sample['single_value'] ?? null;
             } else {
                 // Use pre-processing formula result
                 $formulaName = $evaluationSetting['pre_processing_formula_name'];
@@ -1486,15 +1532,30 @@ class ProductMeasurementController extends Controller
                 }
             }
 
+            // ✅ FIX: value kosong/invalid -> INCOMPLETE (null), bukan NG
+            if ($valueToEvaluate === null || !is_numeric($valueToEvaluate)) {
+                $sample['status'] = null;
+                $hasIncomplete = true;
+                continue;
+            }
+
             $sampleOK = $this->evaluateWithRuleItem($valueToEvaluate, $ruleEvaluation);
             $sample['status'] = $sampleOK;
             
-            if (!$sampleOK) {
+            if ($sampleOK === false) {
+                $hasNG = true;
                 $allSamplesOK = false;
             }
         }
         
-        $result['status'] = $allSamplesOK;
+        if ($hasNG) {
+            $result['status'] = false;
+        } else {
+            if (count($result['samples']) !== $requiredSampleAmount) {
+                $hasIncomplete = true;
+            }
+            $result['status'] = $hasIncomplete ? null : $allSamplesOK;
+        }
         return $result;
     }
 
@@ -2980,7 +3041,9 @@ class ProductMeasurementController extends Controller
                 $evaluated = $this->evaluateSampleItem($processedSamples, $point, $measurementItemData, $context);
 
                 $itemStatus = $evaluated['status'];
-                if ($itemStatus !== true) {
+                // ✅ FIX: overall NG only if any item is explicitly false.
+                // SKIP_CHECK returns null and should NOT make overall false.
+                if ($itemStatus === false) {
                     $overallStatus = false;
                 }
 
@@ -3008,6 +3071,8 @@ class ProductMeasurementController extends Controller
 
             // ✅ FIX: Jika ada NG, status tetap IN_PROGRESS agar muncul di NEED_TO_MEASURE
             // Hanya set COMPLETED jika semua hasil OK
+            // ✅ FIX: Jika semua item SKIP_CHECK (status null) maka overallStatus akan tetap true,
+            // dan harus dianggap COMPLETED/OK.
             $finalStatus = $overallStatus ? 'COMPLETED' : 'IN_PROGRESS';
             
             // Update measurement + simpan hasil akhir + waktu submit
@@ -4049,17 +4114,16 @@ class ProductMeasurementController extends Controller
             $notChecked = 0;
 
             foreach ($products as $product) {
-                $latestMeasurement = ProductMeasurement::where('product_id', $product->id)
+                $measurementQuery = ProductMeasurement::where('product_id', $product->id)
                     ->whereBetween('due_date', [$quarterRange['start'], $quarterRange['end']])
-                    ->whereNotNull('due_date')
-                    ->latest('created_at')
-                    ->first();
+                    ->whereNotNull('due_date');
 
-                if (!$latestMeasurement) {
+                $effectiveMeasurement = $this->pickEffectiveMeasurementForProduct($measurementQuery);
+                if (!$effectiveMeasurement) {
                     continue;
                 }
 
-                $productStatus = $this->determineProductStatus($latestMeasurement);
+                $productStatus = $this->determineProductStatus($effectiveMeasurement);
                 
                 switch ($productStatus) {
                     case 'OK':
@@ -4158,48 +4222,50 @@ class ProductMeasurementController extends Controller
 
                 $productIds = $products->pluck('id')->toArray();
 
-                // Get measurements for these products in the quarter
-                $measurements = ProductMeasurement::whereIn('product_id', $productIds)
-                    ->whereBetween('due_date', [$quarterRange['start'], $quarterRange['end']])
-                    ->whereNotNull('due_date')
-                    ->get();
-
-                if ($measurements->isEmpty()) {
-                    continue; // Skip categories with no measurements in this quarter
-                }
-
-                // Calculate product_result (OK/NG)
+                // ✅ FIX: Summary harus 1 per product (bukan per row measurement) supaya tidak double akibat auto-create TODO setelah NG.
                 $okCount = 0;
-                $ngCount = 0;
-
-                // Calculate product_checking (TODO/checked/done)
+                $ngCount = 0; // represent NEED_TO_MEASURE on dashboard
                 $todoCount = 0;
-                $checkedCount = 0;
-                $doneCount = 0;
+                $checkedCount = 0; // represent ONGOING only (sesuai definisi list filter status=ONGOING)
+                $doneCount = 0; // represent OK only
 
-                foreach ($measurements as $measurement) {
-                    // Product Result: OK vs NG
-                    if ($measurement->status === 'COMPLETED') {
-                        if ($measurement->overall_result) {
-                            $okCount++;
-                        } else {
-                            $ngCount++;
-                        }
+                $totalProducts = 0;
+
+                foreach ($productIds as $pid) {
+                    $measurementQuery = ProductMeasurement::where('product_id', $pid)
+                        ->whereBetween('due_date', [$quarterRange['start'], $quarterRange['end']])
+                        ->whereNotNull('due_date');
+
+                    $effectiveMeasurement = $this->pickEffectiveMeasurementForProduct($measurementQuery);
+                    if (!$effectiveMeasurement) {
+                        continue;
                     }
 
-                    // Product Checking: TODO vs CHECKED vs DONE
-                    if ($measurement->status === 'TODO' || $measurement->batch_number === null) {
+                    $totalProducts++;
+                    $productStatus = $this->determineProductStatus($effectiveMeasurement);
+
+                    // Product Result (OK/NG) where NG is represented by NEED_TO_MEASURE status
+                    if ($productStatus === 'OK') {
+                        $okCount++;
+                    } elseif ($productStatus === 'NEED_TO_MEASURE') {
+                        $ngCount++;
+                    }
+
+                    // Product Checking buckets (todo/checked/done)
+                    // NOTE: Because API does not have a separate "need_to_measure" bucket here,
+                    // we treat NEED_TO_MEASURE as TODO (needs action) to keep totals consistent.
+                    if ($productStatus === 'TODO' || $productStatus === 'NEED_TO_MEASURE') {
                         $todoCount++;
-                    } elseif ($measurement->status === 'IN_PROGRESS') {
-                        $checkedCount++; // Ongoing/In Progress = being checked
-                    } elseif ($measurement->status === 'COMPLETED') {
-                        $doneCount++; // Completed = done checking
-                    } elseif ($measurement->status === 'PENDING') {
-                        $checkedCount++; // Pending = checked, waiting for action
+                    } elseif ($productStatus === 'ONGOING') {
+                        $checkedCount++;
+                    } elseif ($productStatus === 'OK') {
+                        $doneCount++;
                     }
                 }
 
-                $totalProducts = $measurements->count();
+                if ($totalProducts === 0) {
+                    continue;
+                }
 
                 $perCategory[] = [
                     'category_id' => $category->id,
@@ -4598,27 +4664,43 @@ class ProductMeasurementController extends Controller
                 return $this->unauthorizedResponse('User not authenticated');
             }
 
-            // Get overdue measurements
-            $overdueMeasurements = ProductMeasurement::overdue()
+            // ✅ FIX: Avoid double overdue due to auto-create TODO after NG.
+            // Collapse to 1 overdue measurement per product_id.
+            $rawOverdue = ProductMeasurement::overdue()
                 ->with('product:id,product_id,product_name')
                 ->orderBy('due_date', 'asc')
-                ->get()
-                ->map(function ($measurement) {
-                    return [
-                        'measurement_id' => $measurement->measurement_id,
-                        'product_name' => $measurement->product->product_name ?? 'N/A',
-                        'batch_number' => $measurement->batch_number,
-                        'machine_number' => $measurement->machine_number,
-                        'due_date' => $measurement->due_date->format('Y-m-d'),
-                        'days_overdue' => $measurement->due_date->diffInDays(now()),
-                        'status' => $measurement->status,
-                    ];
-                });
+                ->get();
+
+            $grouped = $rawOverdue->groupBy('product_id');
+
+            $overdueMeasurements = $grouped->map(function ($items) {
+                // Prefer IN_PROGRESS over TODO, then earliest due_date
+                $chosen = $items->sortBy(function ($m) {
+                    $priority = match ($m->status) {
+                        'IN_PROGRESS' => 0,
+                        'PENDING' => 1,
+                        'TODO' => 2,
+                        default => 3,
+                    };
+                    $due = $m->due_date ? $m->due_date->timestamp : PHP_INT_MAX;
+                    return ($priority * 10000000000) + $due;
+                })->first();
+
+                return [
+                    'measurement_id' => $chosen->measurement_id,
+                    'product_name' => $chosen->product->product_name ?? 'N/A',
+                    'batch_number' => $chosen->batch_number,
+                    'machine_number' => $chosen->machine_number,
+                    'due_date' => $chosen->due_date->format('Y-m-d'),
+                    'days_overdue' => $chosen->due_date->diffInDays(now()),
+                    'status' => $chosen->status,
+                ];
+            })->values();
 
             return $this->successResponse([
                 'has_overdue' => $overdueMeasurements->isNotEmpty(),
                 'overdue_count' => $overdueMeasurements->count(),
-                'overdue_measurements' => $overdueMeasurements->values(),
+                'overdue_measurements' => $overdueMeasurements,
             ], 'Overdue measurements retrieved successfully');
 
         } catch (\Exception $e) {

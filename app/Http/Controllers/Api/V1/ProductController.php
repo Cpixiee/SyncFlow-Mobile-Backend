@@ -22,6 +22,70 @@ class ProductController extends Controller
     use ApiResponseTrait;
 
     /**
+     * Convert legacy validation errors (array/string map) into enhanced, human-readable measurement point errors
+     * with the same structure used by create endpoint.
+     */
+    private function convertLegacyMeasurementPointErrorsToEnhanced(array $errors, array $measurementPoints): array
+    {
+        $measurementPointErrors = [];
+
+        foreach ($errors as $key => $value) {
+            $messages = is_array($value) ? $value : [$value];
+
+            // Try to extract point index from common key patterns:
+            // - measurement_points.{i}.xxx
+            // - measurement_point_{i}
+            // - measurement_point_{i}_variable_{j}
+            $pointIndex = null;
+            if (is_string($key)) {
+                if (preg_match('/measurement_points\.(\d+)\./', $key, $m)) {
+                    $pointIndex = (int) $m[1];
+                } elseif (preg_match('/measurement_point_(\d+)/', $key, $m)) {
+                    $pointIndex = (int) $m[1];
+                }
+            }
+
+            $setup = ($pointIndex !== null && isset($measurementPoints[$pointIndex]['setup']))
+                ? ($measurementPoints[$pointIndex]['setup'] ?? [])
+                : [];
+
+            $pointName = $setup['name'] ?? (is_int($pointIndex) ? "Measurement Point #{$pointIndex}" : 'Measurement Point');
+            $pointNameId = $setup['name_id'] ?? null;
+
+            // Determine section/entity based on key (best-effort)
+            $section = MeasurementPointSectionEnum::SETUP;
+            $entityName = 'setup';
+            if (is_string($key)) {
+                if (str_contains($key, 'variables')) {
+                    $section = MeasurementPointSectionEnum::VARIABLE;
+                    $entityName = 'variables';
+                } elseif (str_contains($key, 'pre_processing_formulas')) {
+                    $section = MeasurementPointSectionEnum::PRE_PROCESSING_FORMULA;
+                    $entityName = 'pre_processing_formulas';
+                } elseif (str_contains($key, 'evaluation_setting') || str_contains($key, 'evaluation_type')) {
+                    $section = MeasurementPointSectionEnum::EVALUATION;
+                    $entityName = 'evaluation';
+                } elseif (str_contains($key, 'rule_evaluation_setting')) {
+                    $section = MeasurementPointSectionEnum::RULE_EVALUATION;
+                    $entityName = 'rule_evaluation_setting';
+                }
+            }
+
+            foreach ($messages as $msg) {
+                $measurementPointErrors[] = ValidationErrorHelper::createMeasurementPointError(
+                    ['name_id' => $pointNameId, 'name' => $pointName],
+                    $section,
+                    $entityName,
+                    MeasurementPointErrorEnum::LOGICAL_CONFLICT,
+                    "{$pointName} - {$msg}"
+                );
+            }
+        }
+
+        return $measurementPointErrors;
+    }
+
+    /**
      * Create new product
      */
     public function store(Request $request)
@@ -963,7 +1027,24 @@ class ProductController extends Controller
                 if (isset($basicInfo['product_category_id'])) {
                     $category = ProductCategory::find($basicInfo['product_category_id']);
                     if (!$category) {
-                        return $this->errorResponse('Product category tidak ditemukan', 'CATEGORY_NOT_FOUND', 400);
+                        $basicInfoErrors = [
+                            ValidationErrorHelper::createBasicInfoError(
+                                BasicInfoErrorEnum::INVALID_CATEGORY,
+                                'product_category_id',
+                                'Product category tidak ditemukan'
+                            )
+                        ];
+                        $errorResponse = ValidationErrorHelper::formatErrorResponse(
+                            'PRODUCT_VALIDATION_ERROR',
+                            $basicInfoErrors,
+                            []
+                        );
+                        return $this->errorResponse(
+                            'Validation failed',
+                            'PRODUCT_VALIDATION_ERROR',
+                            400,
+                            $errorResponse
+                        );
                     }
                     $product->product_category_id = $basicInfo['product_category_id'];
                 }
@@ -976,10 +1057,24 @@ class ProductController extends Controller
                     }
                     
                     if (!in_array($basicInfo['product_name'], $category->products)) {
+                        $basicInfoErrors = [
+                            ValidationErrorHelper::createBasicInfoError(
+                                BasicInfoErrorEnum::INVALID_PRODUCT_NAME,
+                                'product_name',
+                                "Nama produk \"{$basicInfo['product_name']}\" tidak valid untuk kategori \"{$category->name}\". " .
+                                "Nama yang tersedia: " . implode(', ', $category->products)
+                            )
+                        ];
+                        $errorResponse = ValidationErrorHelper::formatErrorResponse(
+                            'PRODUCT_VALIDATION_ERROR',
+                            $basicInfoErrors,
+                            []
+                        );
                         return $this->errorResponse(
-                            'Product name "' . $basicInfo['product_name'] . '" tidak valid untuk category "' . $category->name . '"',
-                            'INVALID_PRODUCT_NAME',
-                            400
+                            'Validation failed',
+                            'PRODUCT_VALIDATION_ERROR',
+                            400,
+                            $errorResponse
                         );
                     }
                     $product->product_name = $basicInfo['product_name'];
@@ -1057,31 +1152,86 @@ class ProductController extends Controller
                 // Additional validation for measurement points
                 $validationErrors = $this->validateMeasurementPoints($measurementPoints);
                 if (!empty($validationErrors)) {
-                    return $this->errorResponse('Measurement points validation failed', 'MEASUREMENT_VALIDATION_ERROR', 400, $validationErrors);
+                    $measurementPointErrors = $this->convertLegacyMeasurementPointErrorsToEnhanced($validationErrors, $measurementPoints);
+                    $errorResponse = ValidationErrorHelper::formatErrorResponse(
+                        'PRODUCT_VALIDATION_ERROR',
+                        [],
+                        $measurementPointErrors
+                    );
+                    return $this->errorResponse(
+                        'Validation failed',
+                        'PRODUCT_VALIDATION_ERROR',
+                        400,
+                        $errorResponse
+                    );
                 }
 
                 // Validate source and type are required for QUANTITATIVE
                 $quantitativeErrors = $this->validateQuantitativeRequirements($measurementPoints);
                 if (!empty($quantitativeErrors)) {
-                    return $this->errorResponse('QUANTITATIVE measurement validation failed', 'QUANTITATIVE_VALIDATION_ERROR', 400, $quantitativeErrors);
+                    $measurementPointErrors = $this->convertLegacyMeasurementPointErrorsToEnhanced($quantitativeErrors, $measurementPoints);
+                    $errorResponse = ValidationErrorHelper::formatErrorResponse(
+                        'PRODUCT_VALIDATION_ERROR',
+                        [],
+                        $measurementPointErrors
+                    );
+                    return $this->errorResponse(
+                        'Validation failed',
+                        'PRODUCT_VALIDATION_ERROR',
+                        400,
+                        $errorResponse
+                    );
                 }
 
                 // ✅ NEW: Validate QUALITATIVE requirements
                 $qualitativeErrors = $this->validateQualitativeRequirements($measurementPoints);
                 if (!empty($qualitativeErrors)) {
-                    return $this->errorResponse('QUALITATIVE measurement validation failed', 'QUALITATIVE_VALIDATION_ERROR', 400, $qualitativeErrors);
+                    $measurementPointErrors = $this->convertLegacyMeasurementPointErrorsToEnhanced($qualitativeErrors, $measurementPoints);
+                    $errorResponse = ValidationErrorHelper::formatErrorResponse(
+                        'PRODUCT_VALIDATION_ERROR',
+                        [],
+                        $measurementPointErrors
+                    );
+                    return $this->errorResponse(
+                        'Validation failed',
+                        'PRODUCT_VALIDATION_ERROR',
+                        400,
+                        $errorResponse
+                    );
                 }
 
                 // Validate type-specific rules
                 $typeSpecificErrors = $this->validateTypeSpecificRules($measurementPoints);
                 if (!empty($typeSpecificErrors)) {
-                    return $this->errorResponse('Type-specific validation failed', 'TYPE_VALIDATION_ERROR', 400, $typeSpecificErrors);
+                    $measurementPointErrors = $this->convertLegacyMeasurementPointErrorsToEnhanced($typeSpecificErrors, $measurementPoints);
+                    $errorResponse = ValidationErrorHelper::formatErrorResponse(
+                        'PRODUCT_VALIDATION_ERROR',
+                        [],
+                        $measurementPointErrors
+                    );
+                    return $this->errorResponse(
+                        'Validation failed',
+                        'PRODUCT_VALIDATION_ERROR',
+                        400,
+                        $errorResponse
+                    );
                 }
 
                 // Validate name uniqueness
                 $nameValidationErrors = $this->validateNameUniqueness($measurementPoints);
                 if (!empty($nameValidationErrors)) {
-                    return $this->errorResponse('Name validation failed', 'NAME_UNIQUENESS_ERROR', 400, $nameValidationErrors);
+                    $measurementPointErrors = $this->convertLegacyMeasurementPointErrorsToEnhanced($nameValidationErrors, $measurementPoints);
+                    $errorResponse = ValidationErrorHelper::formatErrorResponse(
+                        'PRODUCT_VALIDATION_ERROR',
+                        [],
+                        $measurementPointErrors
+                    );
+                    return $this->errorResponse(
+                        'Validation failed',
+                        'PRODUCT_VALIDATION_ERROR',
+                        400,
+                        $errorResponse
+                    );
                 }
 
                 // Process measurement groups if provided

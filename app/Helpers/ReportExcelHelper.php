@@ -18,9 +18,29 @@ class ReportExcelHelper
      * Transform measurement_results ke format Excel rows
      * Format: [Name, Type, Sample Index, Result]
      */
-    public static function transformMeasurementResultsToExcelRows(Product $product, array $measurementResults): array
+    public static function transformMeasurementResultsToExcelRows(Product $product, array $measurementResults, ?ProductMeasurement $measurement = null): array
     {
         $rows = [];
+
+        // ✅ NEW: Inject batch_number and machine_number as rows (requested)
+        if ($measurement) {
+            if (!empty($measurement->machine_number)) {
+                $rows[] = [
+                    'name' => 'machine_number',
+                    'type' => 'Meta',
+                    'sample_index' => '-',
+                    'result' => $measurement->machine_number
+                ];
+            }
+            if (!empty($measurement->batch_number)) {
+                $rows[] = [
+                    'name' => 'batch_number',
+                    'type' => 'Meta',
+                    'sample_index' => '-',
+                    'result' => $measurement->batch_number
+                ];
+            }
+        }
         
         if (empty($measurementResults)) {
             Log::warning('No measurement results to transform for product: ' . $product->product_id);

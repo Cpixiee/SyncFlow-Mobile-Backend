@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\V1;
 use App\Http\Controllers\Controller;
 use App\Models\Product;
 use App\Models\ProductMeasurement;
+use App\Models\ScaleMeasurement;
 use App\Models\Quarter;
 use App\Models\ReportMasterFile;
 use App\Traits\ApiResponseTrait;
@@ -690,7 +691,7 @@ class ReportController extends Controller
             }
             
             // Transform to Excel rows
-            $dataRows = ReportExcelHelper::transformMeasurementResultsToExcelRows($product, $measurementResults);
+            $dataRows = ReportExcelHelper::transformMeasurementResultsToExcelRows($product, $measurementResults, $measurement);
             
             // Log hasil transform
             Log::info('Download Excel - Data Rows Count: ' . count($dataRows));
@@ -866,7 +867,7 @@ class ReportController extends Controller
             Log::info('Download PDF - Measurement ID: ' . $measurement->measurement_id);
             Log::info('Download PDF - Measurement Results Count: ' . count($measurementResults));
             
-            $dataRows = ReportExcelHelper::transformMeasurementResultsToExcelRows($product, $measurementResults);
+            $dataRows = ReportExcelHelper::transformMeasurementResultsToExcelRows($product, $measurementResults, $measurement);
             
             // Log hasil transform
             Log::info('Download PDF - Data Rows Count: ' . count($dataRows));
@@ -936,6 +937,96 @@ class ReportController extends Controller
             }
         } catch (\Exception $e) {
             return $this->errorResponse('Error downloading PDF: ' . $e->getMessage(), 'PDF_DOWNLOAD_ERROR', 500);
+        }
+    }
+
+    /**
+     * Download Scale Measurement CSV per day
+     * GET /api/v1/reports/download/scale-csv?date=YYYY-MM-DD
+     *
+     * Columns (match UI screenshot):
+     * Product Name, Category, Batch Number, Machine Number, No. Document,
+     * No. Document Reference, Article Code, Weight, Status
+     */
+    public function downloadScaleCsv(Request $request)
+    {
+        try {
+            $user = JWTAuth::parseToken()->authenticate();
+            if (!$user) {
+                return $this->unauthorizedResponse('User not authenticated');
+            }
+
+            $validator = Validator::make($request->all(), [
+                'date' => 'required|date_format:Y-m-d',
+            ]);
+
+            if ($validator->fails()) {
+                return $this->validationErrorResponse(
+                    $validator->errors(),
+                    'Request invalid'
+                );
+            }
+
+            $date = $request->get('date');
+
+            $rows = ScaleMeasurement::with(['product.productCategory'])
+                ->whereDate('measurement_date', $date)
+                ->orderBy('created_at', 'asc')
+                ->get();
+
+            $headers = [
+                'Product Name',
+                'Category',
+                'Batch Number',
+                'Machine Number',
+                'No. Document',
+                'No. Document Reference',
+                'Article Code',
+                'Weight',
+                'Status',
+            ];
+
+            $filename = "scale_measurements_{$date}.csv";
+
+            return response()->streamDownload(function () use ($rows, $headers) {
+                $out = fopen('php://output', 'w');
+                // UTF-8 BOM for Excel compatibility
+                fwrite($out, "\xEF\xBB\xBF");
+
+                fputcsv($out, $headers);
+
+                foreach ($rows as $m) {
+                    $product = $m->product;
+                    $category = $product?->productCategory;
+
+                    $status = $m->status ?? null;
+                    // UI shows "NOT CHECKED" / "CHECKED"
+                    $statusLabel = $status ? str_replace('_', ' ', strtoupper($status)) : '';
+
+                    fputcsv($out, [
+                        $product->product_spec_name ?? $product->product_name ?? '',
+                        $category->name ?? '',
+                        $m->batch_number ?? '',
+                        $m->machine_number ?? '',
+                        $product->no_document ?? '',
+                        $product->no_doc_reference ?? '',
+                        $product->article_code ?? '',
+                        $m->weight !== null ? (string) $m->weight : '',
+                        $statusLabel,
+                    ]);
+                }
+
+                fclose($out);
+            }, $filename, [
+                'Content-Type' => 'text/csv; charset=UTF-8',
+                'Content-Disposition' => 'attachment; filename="' . $filename . '"',
+            ]);
+        } catch (\Exception $e) {
+            return $this->errorResponse(
+                'Error downloading scale CSV: ' . $e->getMessage(),
+                'SCALE_CSV_DOWNLOAD_ERROR',
+                500
+            );
         }
     }
 
