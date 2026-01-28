@@ -993,7 +993,8 @@ class ReportController extends Controller
                 // UTF-8 BOM for Excel compatibility
                 fwrite($out, "\xEF\xBB\xBF");
 
-                fputcsv($out, $headers);
+                // Use semicolon delimiter for better Excel compatibility on locales that use ',' as decimal separator
+                fputcsv($out, $headers, ';');
 
                 foreach ($rows as $m) {
                     $product = $m->product;
@@ -1013,7 +1014,7 @@ class ReportController extends Controller
                         $product->article_code ?? '',
                         $m->weight !== null ? (string) $m->weight : '',
                         $statusLabel,
-                    ]);
+                    ], ';');
                 }
 
                 fclose($out);
