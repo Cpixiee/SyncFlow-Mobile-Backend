@@ -55,6 +55,7 @@ class DashboardApiTest extends TestCase
         // Create products for each category
         $tubeProduct1 = Product::factory()->create(['product_category_id' => $tubeCategory->id]);
         $tubeProduct2 = Product::factory()->create(['product_category_id' => $tubeCategory->id]);
+        $tubeProduct3 = Product::factory()->create(['product_category_id' => $tubeCategory->id]);
         $wireProduct1 = Product::factory()->create(['product_category_id' => $wireCategory->id]);
 
         // Create measurements for Q3 2025 (Jul-Sep)
@@ -72,6 +73,26 @@ class DashboardApiTest extends TestCase
             'status' => 'TODO',
             'overall_result' => null,
             'batch_number' => null,
+        ]);
+
+        // IN_PROGRESS but already submitted with NG -> should be NEED_TO_MEASURE
+        // and must be counted as "done" bucket in progress-category (not "todo")
+        ProductMeasurement::factory()->create([
+            'product_id' => $tubeProduct3->id,
+            'due_date' => '2025-09-01',
+            'status' => 'IN_PROGRESS',
+            'overall_result' => null,
+            'batch_number' => 'BATCH-003',
+            'measured_at' => Carbon::parse('2025-09-02'),
+            'measurement_results' => [
+                [
+                    'measurement_item_id' => 'ITEM-001',
+                    'status' => false, // NG
+                    'samples' => [
+                        ['status' => false],
+                    ],
+                ],
+            ],
         ]);
 
         ProductMeasurement::factory()->create([
@@ -114,7 +135,7 @@ class DashboardApiTest extends TestCase
         $this->assertEquals(1, $tubeData['product_result']['ok']);
         $this->assertEquals(0, $tubeData['product_result']['ng']);
         $this->assertEquals(1, $tubeData['product_checking']['todo']);
-        $this->assertEquals(1, $tubeData['product_checking']['done']);
+        $this->assertEquals(2, $tubeData['product_checking']['done']); // OK + NEED_TO_MEASURE
 
         // Find Wire Test category
         $wireData = collect($data)->firstWhere('category_name', 'Wire Test Reguler');

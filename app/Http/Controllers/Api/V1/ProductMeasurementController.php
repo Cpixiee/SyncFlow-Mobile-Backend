@@ -4252,13 +4252,15 @@ class ProductMeasurementController extends Controller
                     }
 
                     // Product Checking buckets (todo/checked/done)
-                    // NOTE: Because API does not have a separate "need_to_measure" bucket here,
-                    // we treat NEED_TO_MEASURE as TODO (needs action) to keep totals consistent.
-                    if ($productStatus === 'TODO' || $productStatus === 'NEED_TO_MEASURE') {
+                    // NOTE: Dashboard buckets are used to match list filters:
+                    // - todo   -> status=TODO
+                    // - checked-> status=ONGOING
+                    // - done   -> everything that is not in todo/checked (incl. NEED_TO_MEASURE and OK)
+                    if ($productStatus === 'TODO') {
                         $todoCount++;
                     } elseif ($productStatus === 'ONGOING') {
                         $checkedCount++;
-                    } elseif ($productStatus === 'OK') {
+                    } elseif ($productStatus === 'OK' || $productStatus === 'NEED_TO_MEASURE') {
                         $doneCount++;
                     }
                 }
